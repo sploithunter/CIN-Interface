@@ -307,8 +307,8 @@ export class SessionZone {
 
     const sprite = new THREE.Sprite(material);
     sprite.scale.set(5, 1.25, 1);
-    // Position above hex, slightly towards top-left but mostly centered
-    sprite.position.set(0, HEX_HEIGHT + 2.2, -HEX_SIZE * 0.3);
+    // Position centered above hex platform
+    sprite.position.set(0, HEX_HEIGHT + 2.5, 0);
 
     return sprite;
   }
@@ -772,7 +772,7 @@ export class SessionZone {
     }
 
     // Label hover animation
-    this.sessionLabel.position.y = HEX_HEIGHT + 2.2 + Math.sin(elapsed * 0.7) * 0.03;
+    this.sessionLabel.position.y = HEX_HEIGHT + 2.5 + Math.sin(elapsed * 0.7) * 0.03;
   }
 
   dispose(): void {

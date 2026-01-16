@@ -273,6 +273,7 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
   el.className = `feed-item ${getEventClass(event)}`;
 
   const toolName = event.tool || event.type;
+  const toolIcon = getToolIcon(event.tool);
   const duration = event.duration ? `<span class="feed-item-duration">${event.duration}ms</span>` : '';
   const filePath = getFilePath(event);
   const fileHtml = filePath ? `<div class="feed-item-file">${escapeHtml(filePath)}</div>` : '';
@@ -284,7 +285,7 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
     const content = formatEventContent(event);
     el.innerHTML = `
       <div class="feed-item-header">
-        <span class="feed-item-tool">${escapeHtml(toolName)}</span>
+        <span class="feed-item-tool">${toolIcon}${escapeHtml(toolName)}</span>
         <span class="feed-item-time">${formatTime(event.timestamp)}${duration}</span>
       </div>
       ${fileHtml}
@@ -301,7 +302,7 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
   } else {
     el.innerHTML = `
       <div class="feed-item-header">
-        <span class="feed-item-tool">${escapeHtml(toolName)}</span>
+        <span class="feed-item-tool">${toolIcon}${escapeHtml(toolName)}</span>
         <span class="feed-item-time">${formatTime(event.timestamp)}${duration}</span>
       </div>
       ${fileHtml}
@@ -330,6 +331,29 @@ function getEventClass(event: VibecraftEvent): string {
   if (tool === 'task') return 'tool-task';
   if (tool === 'todowrite') return 'tool-todo';
   return '';
+}
+
+function getToolIcon(tool: string | undefined): string {
+  if (!tool) return '';
+
+  const toolLower = tool.toLowerCase();
+
+  // Map tools to icons (using simple SVG icons)
+  const icons: Record<string, string> = {
+    edit: `<svg class="tool-icon tool-icon-edit" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`,
+    bash: `<svg class="tool-icon tool-icon-bash" viewBox="0 0 24 24" fill="currentColor"><path d="M20 19.59V8l-6-6H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c.45 0 .85-.15 1.19-.4l-4.43-4.43c-.8.52-1.74.83-2.76.83-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5c0 1.02-.31 1.96-.83 2.75L20 19.59z"/></svg>`,
+    read: `<svg class="tool-icon tool-icon-read" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>`,
+    write: `<svg class="tool-icon tool-icon-write" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>`,
+    grep: `<svg class="tool-icon tool-icon-grep" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>`,
+    glob: `<svg class="tool-icon tool-icon-glob" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>`,
+    webfetch: `<svg class="tool-icon tool-icon-web" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>`,
+    websearch: `<svg class="tool-icon tool-icon-web" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>`,
+    task: `<svg class="tool-icon tool-icon-task" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>`,
+    todowrite: `<svg class="tool-icon tool-icon-todo" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>`,
+    notebookedit: `<svg class="tool-icon tool-icon-write" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>`,
+  };
+
+  return icons[toolLower] || `<svg class="tool-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>`;
 }
 
 function getFilePath(event: VibecraftEvent): string | null {

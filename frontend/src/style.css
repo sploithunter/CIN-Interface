@@ -433,7 +433,26 @@ kbd {
 .feed-item-tool {
   font-weight: 600;
   color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+
+/* Tool icons */
+.tool-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.tool-icon-edit { color: #f59e0b; }
+.tool-icon-bash { color: #22c55e; }
+.tool-icon-read { color: #8b5cf6; }
+.tool-icon-write { color: #3b82f6; }
+.tool-icon-grep, .tool-icon-glob { color: #06b6d4; }
+.tool-icon-web { color: #ec4899; }
+.tool-icon-task { color: #a855f7; }
+.tool-icon-todo { color: #eab308; }
 
 .feed-item-time {
   color: var(--text-muted);
