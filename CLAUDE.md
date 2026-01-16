@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Development Guidelines
+
+**IMPORTANT**: When working on this codebase:
+- Keep going until the task is completely finished
+- Don't take shortcuts
+- Don't do any hand waving
+- Don't assume errors are from previous issues - ALL errors must be fixed
+- Test everything end-to-end before considering a task complete
+
 ## Project Overview
 
 CIN-Interface is a fork of [Vibecraft](https://vibecraft.sh) - a 3D visualization interface for Claude Code. The goal is to extend it to connect to CIN-API and potentially other IDE CLIs beyond Claude Code.

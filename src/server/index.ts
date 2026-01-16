@@ -606,9 +606,10 @@ function createSession(options: CreateSessionOptions = {}): Promise<ManagedSessi
 
     const claudeCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude';
 
+    // Single-quote the PATH to handle spaces in paths (e.g., VMware Fusion.app)
     execFile(
       'tmux',
-      ['new-session', '-d', '-s', tmuxSession, '-c', cwd, `PATH=${EXEC_PATH} ${claudeCmd}`],
+      ['new-session', '-d', '-s', tmuxSession, '-c', cwd, `PATH='${EXEC_PATH}' ${claudeCmd}`],
       EXEC_OPTIONS,
       (error) => {
         if (error) {
@@ -1453,6 +1454,105 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
           res.end(JSON.stringify({ ok: true }));
         }
       });
+      return;
+    }
+
+    // POST /sessions/:id/restart - Restart an offline session
+    if (req.method === 'POST' && action === 'restart') {
+      const session = getSession(sessionId);
+      if (!session) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
+        return;
+      }
+
+      // Validate inputs to prevent command injection
+      try {
+        validateTmuxSession(session.tmuxSession);
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Invalid tmux session name' }));
+        return;
+      }
+
+      let cwd: string;
+      try {
+        cwd = validateDirectoryPath(session.cwd || process.cwd());
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: `Invalid directory: ${err instanceof Error ? err.message : err}`,
+          })
+        );
+        return;
+      }
+
+      // Kill existing tmux session if it exists (ignore errors)
+      execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, () => {
+        // Respawn tmux session with claude using execFile
+        // Single-quote the PATH to handle spaces in paths (e.g., VMware Fusion.app)
+        execFile(
+          'tmux',
+          [
+            'new-session',
+            '-d',
+            '-s',
+            session.tmuxSession,
+            '-c',
+            cwd,
+            `PATH='${EXEC_PATH}' claude -c --permission-mode=bypassPermissions --dangerously-skip-permissions`,
+          ],
+          EXEC_OPTIONS,
+          (error) => {
+            if (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${error.message}` }));
+              return;
+            }
+
+            session.status = 'idle';
+            session.lastActivity = Date.now();
+            session.claudeSessionId = undefined;
+            session.currentTool = undefined;
+
+            // Clear old linking
+            for (const [claudeId, managedId] of claudeToManagedMap) {
+              if (managedId === session.id) {
+                claudeToManagedMap.delete(claudeId);
+              }
+            }
+
+            log(`Restarted session: ${session.name} (${session.id.slice(0, 8)})`);
+            broadcastSessions();
+            saveSessions();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, session }));
+          }
+        );
+      });
+      return;
+    }
+
+    // PATCH /sessions/:id - Update session name or zone position
+    if (req.method === 'PATCH' && !action) {
+      const session = getSession(sessionId);
+      if (!session) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
+        return;
+      }
+      try {
+        const body = await collectRequestBody(req);
+        const updates = JSON.parse(body) as { name?: string; zonePosition?: ZonePosition };
+        const updated = updateSession(sessionId, updates);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, session: updated }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }));
+      }
       return;
     }
   }
