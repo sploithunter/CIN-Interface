@@ -54,6 +54,7 @@
   - [x] Hex hover effect (outline brightens on mouseover)
   - [x] Session cards layout matching Vibecraft (All Sessions row + cards below)
   - [x] 3D labels centered above hex platforms
+  - [x] Tool icons in activity feed (Edit=pencil, Bash=terminal, Read=document, etc.)
 
 - [ ] Session context menu (right-click)
   - Restart session
