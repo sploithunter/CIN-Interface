@@ -48,6 +48,13 @@
   - [x] Duration badges (e.g., "79ms")
   - [x] File path display for file operations
 
+- [x] Interaction improvements
+  - [x] Click empty hex to create session at that position
+  - [x] Compact popup menu (Create zone / Add text label) like Vibecraft
+  - [x] Hex hover effect (outline brightens on mouseover)
+  - [x] Session cards layout matching Vibecraft (All Sessions row + cards below)
+  - [x] 3D labels centered above hex platforms
+
 - [ ] Session context menu (right-click)
   - Restart session
   - Delete session
