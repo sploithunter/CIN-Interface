@@ -1,0 +1,71 @@
+#!/bin/bash
+#
+# Vibecraft CLI Wrapper
+#
+# This wrapper ensures PATH is set up correctly on macOS before running
+# the Node.js CLI. On Linux and properly-configured macOS, it simply
+# passes through to Node.js.
+#
+
+# =============================================================================
+# macOS PATH Fix
+# On macOS, the shell environment may not include Homebrew paths.
+# Add them defensively so node, jq, tmux etc. can be found.
+# =============================================================================
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # Apple Silicon Homebrew
+  [ -d "/opt/homebrew/bin" ] && export PATH="/opt/homebrew/bin:$PATH"
+  # Intel Homebrew
+  [ -d "/usr/local/bin" ] && export PATH="/usr/local/bin:$PATH"
+  # User local bin (Claude CLI location)
+  [ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# =============================================================================
+# Find Node.js
+# =============================================================================
+NODE=""
+
+# Check PATH first - this respects nvm, fnm, volta, etc.
+NODE=$(command -v node 2>/dev/null)
+
+# If not in PATH, check known locations (helps on macOS with limited PATH)
+if [ -z "$NODE" ]; then
+  for loc in \
+    "/opt/homebrew/bin/node" \
+    "/usr/local/bin/node" \
+    "$HOME/.local/bin/node" \
+    "/usr/bin/node"
+  do
+    if [ -x "$loc" ]; then
+      NODE="$loc"
+      break
+    fi
+  done
+fi
+
+# If still not found, give a helpful error
+if [ -z "$NODE" ]; then
+  echo "Error: Node.js not found"
+  echo ""
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "On macOS, install Node.js via Homebrew:"
+    echo "  brew install node"
+    echo ""
+    echo "If already installed, ensure Homebrew is in your PATH."
+    echo "Add this to your ~/.zshrc:"
+    echo "  eval \"\$(/opt/homebrew/bin/brew shellenv)\""
+  else
+    echo "Install Node.js using your package manager:"
+    echo "  Ubuntu/Debian: sudo apt install nodejs"
+    echo "  Fedora: sudo dnf install nodejs"
+    echo "  Arch: sudo pacman -S nodejs"
+  fi
+  exit 1
+fi
+
+# =============================================================================
+# Run the actual CLI
+# =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$NODE" "$SCRIPT_DIR/cli.js" "$@"

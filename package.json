@@ -1,0 +1,61 @@
+{
+  "name": "cin-interface",
+  "version": "0.1.0",
+  "description": "3D visualization interface for Claude Code and CIN-API (forked from Vibecraft)",
+  "author": "jason",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jason/CIN-Interface"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "cin-api",
+    "visualization",
+    "3d",
+    "ai",
+    "developer-tools"
+  ],
+  "type": "module",
+  "bin": {
+    "vibecraft": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "hooks/",
+    "dist/",
+    "!dist/**/*.map",
+    "data/.gitkeep"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "tsc && vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "preview": "vite preview",
+    "server": "tsx server/index.ts",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build",
+    "deploy": "./scripts/deploy.sh",
+    "release": "./scripts/release.sh"
+  },
+  "dependencies": {
+    "@deepgram/sdk": "^4.11.3",
+    "chokidar": "^4.0.0",
+    "three": "^0.170.0",
+    "tone": "^15.1.22",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/three": "^0.170.0",
+    "@types/ws": "^8.5.13",
+    "concurrently": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  }
+}

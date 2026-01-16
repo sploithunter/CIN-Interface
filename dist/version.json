@@ -1,0 +1,6 @@
+{
+  "latest": "0.1.12",
+  "minSupported": "0.1.0",
+  "releaseUrl": "https://github.com/Elysian-Labs/vibecraft/releases",
+  "updateCommand": "npx vibecraft@latest setup"
+}

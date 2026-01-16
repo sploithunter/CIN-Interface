@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output (keep dist/ for now since we don't have source)
+# dist/
+
+# Local data
+data/*.jsonl
+data/*.json
+!data/.gitkeep
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
