@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Watch and Manage Claude Code in 3D!" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>CIN-Interface - Watch and Manage Claude Code in 3D!</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CIN-Interface" />
+    <meta property="og:title" content="CIN-Interface - Watch and Manage Claude Code in 3D!" />
+    <meta property="og:description" content="Watch and Manage Claude Code in 3D!" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Left: 3D Scene -->
+      <div id="scene-panel">
+        <div id="canvas-container"></div>
+
+        <!-- Scene HUD -->
+        <div id="scene-hud">
+          <div class="scene-badge unified-hud">
+            <div id="status-dot"></div>
+            <span id="username" class="hud-user">...</span>
+            <span id="status-text"></span>
+            <span class="hud-sep">|</span>
+            <span id="token-counter" class="hud-tokens" title="Tokens used this session">0 tok</span>
+            <span class="hud-sep">|</span>
+            <button id="settings-btn" class="hud-btn" title="Settings">Settings</button>
+          </div>
+        </div>
+
+        <!-- Keybind Helper (bottom-left) -->
+        <div id="keybind-helper">
+          <div class="keybind-list">
+            <span class="keybind"><kbd>1-6</kbd> sessions | <kbd>0</kbd> all | <kbd>Tab</kbd> focus</span>
+          </div>
+        </div>
+
+        <!-- Voice Control (center bottom) -->
+        <div id="voice-control" class="voice-control hidden">
+          <div class="voice-idle">
+            <button type="button" id="voice-btn" class="voice-trigger" title="Start voice input">Mic</button>
+            <span class="voice-hint"><kbd>Ctrl</kbd><kbd>M</kbd></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Activity Feed -->
+      <div id="feed-panel">
+        <div id="feed-header">
+          <h2>CIN-Interface</h2>
+          <div class="feed-header-right">
+            <span id="connection-status" class="connection-status">Connecting...</span>
+            <button id="about-btn" class="feed-about-btn" title="About">?</button>
+          </div>
+        </div>
+
+        <!-- Session Management -->
+        <div id="sessions-panel">
+          <div id="sessions-list">
+            <div class="session-item all-sessions active" data-session="all">
+              <div class="session-hotkey">0</div>
+              <div class="session-icon">All</div>
+              <div class="session-info">
+                <div class="session-name">All Sessions</div>
+                <div class="session-detail" id="all-sessions-count">No active sessions</div>
+              </div>
+            </div>
+            <div id="managed-sessions"></div>
+          </div>
+          <button id="new-session-btn" class="new-session-btn">+ New Zone</button>
+        </div>
+
+        <div id="activity-feed-wrapper">
+          <div id="activity-feed">
+            <div id="feed-empty">
+              <div id="feed-empty-icon">Tools</div>
+              <h3>Waiting for activity</h3>
+              <p>Start using Claude Code to see events here</p>
+            </div>
+          </div>
+          <button id="feed-scroll-bottom" class="hidden">Jump to latest</button>
+        </div>
+
+        <div id="prompt-container">
+          <form id="prompt-form">
+            <div class="input-wrapper">
+              <textarea id="prompt-input" placeholder="Send a prompt to the selected session..." autocomplete="off" rows="1"></textarea>
+            </div>
+            <button type="submit" id="prompt-submit">Send</button>
+            <button type="button" id="prompt-cancel" class="hidden">Stop</button>
+          </form>
+          <div id="prompt-options">
+            <span id="prompt-target">No session selected</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Session Modal -->
+    <div id="new-session-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>New Zone</h3>
+        </div>
+
+        <div class="modal-field">
+          <label for="session-cwd-input">Directory</label>
+          <input type="text" id="session-cwd-input" placeholder="Start typing or select from recent..." autocomplete="off" />
+          <div id="cwd-autocomplete" class="autocomplete-dropdown hidden"></div>
+          <div class="field-hint">Default: <code id="modal-default-cwd">Loading...</code></div>
+        </div>
+
+        <div class="modal-field">
+          <label>Recent Projects</label>
+          <div id="recent-projects" class="recent-projects"></div>
+        </div>
+
+        <div class="modal-field">
+          <label for="session-name-input">Name</label>
+          <input type="text" id="session-name-input" placeholder="Auto-filled from directory..." autocomplete="off" />
+        </div>
+
+        <div class="modal-field">
+          <label>Options</label>
+          <div class="modal-checkboxes">
+            <label class="modal-checkbox">
+              <input type="checkbox" id="session-opt-continue" checked />
+              <span class="checkbox-label">Continue <code>-c</code></span>
+            </label>
+            <label class="modal-checkbox">
+              <input type="checkbox" id="session-opt-skip-perms" checked />
+              <span class="checkbox-label">Skip permissions</span>
+            </label>
+            <label class="modal-checkbox">
+              <input type="checkbox" id="session-opt-chrome" />
+              <span class="checkbox-label">Chrome <code>--chrome</code></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="modal-btn modal-btn-cancel" id="modal-cancel">Cancel</button>
+          <button type="button" class="modal-btn modal-btn-create" id="modal-create">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Settings</h3>
+        </div>
+
+        <div class="modal-field">
+          <label>Agent Connection</label>
+          <div class="settings-port-row">
+            <span class="port-label">localhost:</span>
+            <input type="number" id="settings-port" value="4003" min="1" max="65535" />
+            <span id="settings-port-status" class="port-status"></span>
+          </div>
+          <div class="field-hint">Port where the CIN-Interface server is running.</div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="modal-btn modal-btn-cancel" id="settings-close">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- About Modal -->
+    <div id="about-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>CIN-Interface</h3>
+        </div>
+
+        <div class="about-description">
+          <p>A 3D visualization interface for Claude Code.</p>
+          <p>Watch and manage your Claude sessions in real-time.</p>
+          <p class="about-subtitle">Syncs with Claude Code instances running locally. No files or code are sent externally.</p>
+        </div>
+
+        <div class="about-section">
+          <div class="about-section-title">Commands</div>
+          <div class="about-commands">
+            <div class="about-cmd"><code>npm start</code><span>Start server</span></div>
+          </div>
+        </div>
+
+        <div class="about-footer">
+          <span id="about-version" class="about-version">v0.1.0</span>
+          <span class="about-sep">|</span>
+          <span class="about-credit">Fork of Vibecraft</span>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="modal-btn modal-btn-cancel" id="about-close">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Not Connected Overlay -->
+    <div id="not-connected-overlay" class="hidden">
+      <div class="not-connected-content">
+        <h2>CIN-Interface</h2>
+        <p class="not-connected-description">
+          A 3D visualization interface for Claude Code.
+        </p>
+        <div class="not-connected-setup">
+          <p class="not-connected-setup-label">Start the server:</p>
+          <div class="not-connected-code">cd CIN-Interface && npm start</div>
+        </div>
+        <div class="not-connected-actions">
+          <button class="not-connected-btn" id="retry-connection">Reconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast notifications -->
+    <div id="toast-container"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
