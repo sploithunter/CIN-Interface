@@ -63,17 +63,17 @@
 
         <!-- Session Management -->
         <div id="sessions-panel">
-          <div id="sessions-list">
-            <div class="session-item all-sessions active" data-session="all">
-              <div class="session-hotkey">0</div>
-              <div class="session-icon">All</div>
-              <div class="session-info">
-                <div class="session-name">All Sessions</div>
-                <div class="session-detail" id="all-sessions-count">No active sessions</div>
-              </div>
+          <!-- All Sessions row -->
+          <div class="all-sessions-row" data-session="all">
+            <span class="all-sessions-hotkey">0</span>
+            <span class="all-sessions-icon">📁</span>
+            <div class="all-sessions-info">
+              <span class="all-sessions-title">All Sessions</span>
+              <span class="all-sessions-count" id="all-sessions-count">No active sessions</span>
             </div>
-            <div id="managed-sessions"></div>
           </div>
+          <!-- Session cards row -->
+          <div id="managed-sessions" class="session-cards-row"></div>
           <button id="new-session-btn" class="new-session-btn">+ New Zone</button>
         </div>
 
@@ -222,6 +222,19 @@
           <button class="not-connected-btn" id="retry-connection">Reconnect</button>
         </div>
       </div>
+    </div>
+
+    <!-- Hex Context Menu (appears when clicking empty hex) -->
+    <div id="hex-context-menu" class="hex-context-menu hidden">
+      <div class="hex-menu-option" data-action="create-zone">
+        <span class="hex-menu-key">C</span>
+        <span class="hex-menu-label">Create zone</span>
+      </div>
+      <div class="hex-menu-option" data-action="add-label">
+        <span class="hex-menu-key">T</span>
+        <span class="hex-menu-label">Add text label</span>
+      </div>
+      <div class="hex-menu-hint">Move elsewhere to dismiss</div>
     </div>
 
     <!-- Toast notifications -->

@@ -11,6 +11,7 @@ let selectedSessionId: string | null = 'all';
 let _isConnected = false;
 let tokenCount = 0;
 let sceneManager: SceneManager | null = null;
+let pendingZonePosition: { q: number; r: number } | null = null;
 
 // DOM Elements
 const statusDot = document.getElementById('status-dot')!;
@@ -58,6 +59,11 @@ const settingsClose = document.getElementById('settings-close')!;
 // About modal
 const aboutClose = document.getElementById('about-close')!;
 
+// Hex context menu
+const hexContextMenu = document.getElementById('hex-context-menu')!;
+let hexMenuPosition: { q: number; r: number } | null = null;
+let hexMenuShowTime = 0;
+
 // Initialize
 async function init() {
   console.log('[CIN] Initializing...');
@@ -69,6 +75,9 @@ async function init() {
       if (sessionId) {
         selectSession(sessionId);
       }
+    });
+    sceneManager.setOnEmptyHexClick((hexPosition, screenPos) => {
+      showHexContextMenu(hexPosition, screenPos);
     });
     sceneManager.start();
     console.log('[CIN] 3D scene initialized');
@@ -150,24 +159,26 @@ function formatTokens(n: number): string {
 
 function renderSessions() {
   const activeCount = sessions.filter(s => s.status !== 'offline').length;
+  const workingCount = sessions.filter(s => s.status === 'working').length;
   allSessionsCount.textContent = activeCount > 0
-    ? `${activeCount} active session${activeCount !== 1 ? 's' : ''}`
+    ? `${activeCount} session${activeCount !== 1 ? 's' : ''}, ${workingCount} working`
     : 'No active sessions';
 
   managedSessionsEl.innerHTML = sessions.map((session, index) => `
-    <div class="session-item ${selectedSessionId === session.id ? 'active' : ''}" data-session="${session.id}">
-      <div class="session-hotkey">${index + 1}</div>
-      <div class="session-icon">${getSessionIcon(session)}</div>
-      <div class="session-info">
-        <div class="session-name">${escapeHtml(session.name)}</div>
-        <div class="session-detail">${session.currentTool || session.cwd || 'Idle'}</div>
+    <div class="session-card ${session.status} ${selectedSessionId === session.id ? 'selected' : ''}" data-session="${session.id}">
+      <div class="session-card-header">
+        <span class="session-hotkey">${index + 1}</span>
+        <span class="session-status-dot ${session.status}"></span>
+        <span class="session-name">${escapeHtml(session.name)}</span>
       </div>
-      <div class="session-status ${session.status}"></div>
+      <div class="session-card-detail">
+        ${getSessionStatusText(session)}
+      </div>
     </div>
   `).join('');
 
   // Add click handlers
-  managedSessionsEl.querySelectorAll('.session-item').forEach(el => {
+  managedSessionsEl.querySelectorAll('.session-card').forEach(el => {
     el.addEventListener('click', () => {
       selectSession(el.getAttribute('data-session'));
     });
@@ -176,22 +187,30 @@ function renderSessions() {
   updatePromptTarget();
 }
 
-function getSessionIcon(session: ManagedSession): string {
-  switch (session.status) {
-    case 'working': return 'Working';
-    case 'waiting': return 'Waiting';
-    case 'idle': return 'Idle';
-    case 'offline': return 'Offline';
-    default: return 'Zone';
+function getSessionStatusText(session: ManagedSession): string {
+  if (session.status === 'waiting') {
+    return '<span class="needs-attention">⚡ Needs attention</span>';
   }
+  if (session.currentTool) {
+    return `<span class="session-tool">${escapeHtml(session.currentTool)}</span> · just now`;
+  }
+  if (session.status === 'working') {
+    return 'Working...';
+  }
+  if (session.status === 'offline') {
+    return 'Offline';
+  }
+  // Extract folder name from cwd for display
+  const folder = session.cwd?.split('/').pop() || 'Idle';
+  return folder;
 }
 
 function selectSession(sessionId: string | null) {
   selectedSessionId = sessionId;
 
-  // Update UI
-  document.querySelectorAll('.session-item').forEach(el => {
-    el.classList.toggle('active', el.getAttribute('data-session') === sessionId);
+  // Update UI - highlight selected session card
+  document.querySelectorAll('.session-card').forEach(el => {
+    el.classList.toggle('selected', el.getAttribute('data-session') === sessionId);
   });
 
   // Update 3D scene selection
@@ -357,13 +376,13 @@ function scrollToBottom() {
 
 // Event handlers
 function setupEventHandlers() {
-  // All sessions item
-  document.querySelector('.session-item.all-sessions')?.addEventListener('click', () => {
+  // All sessions row
+  document.querySelector('.all-sessions-row')?.addEventListener('click', () => {
     selectSession('all');
   });
 
   // New session button
-  newSessionBtn.addEventListener('click', openNewSessionModal);
+  newSessionBtn.addEventListener('click', () => openNewSessionModal());
 
   // Modal buttons
   modalCancel.addEventListener('click', closeNewSessionModal);
@@ -439,8 +458,59 @@ function setupEventHandlers() {
     setTimeout(() => cwdAutocomplete.classList.add('hidden'), 200);
   });
 
+  // Hex context menu handlers
+  hexContextMenu.querySelectorAll('.hex-menu-option').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const action = (el as HTMLElement).dataset.action;
+      if (action === 'create-zone' && hexMenuPosition) {
+        hideHexContextMenu();
+        openNewSessionModal(hexMenuPosition);
+      } else if (action === 'add-label') {
+        // TODO: Implement text label feature
+        hideHexContextMenu();
+        showToast('Text labels not yet implemented', 'error');
+      }
+    });
+  });
+
+  // Dismiss hex context menu when clicking anywhere else
+  document.addEventListener('click', (e) => {
+    if (!hexContextMenu.contains(e.target as Node) && !hexContextMenu.classList.contains('hidden')) {
+      hideHexContextMenu();
+    }
+  });
+
+  // Dismiss on canvas mouse movement after a brief delay (Vibecraft behavior)
+  canvasContainer.addEventListener('mousemove', () => {
+    // Only dismiss if menu has been visible for at least 150ms
+    if (!hexContextMenu.classList.contains('hidden') && Date.now() - hexMenuShowTime > 150) {
+      hideHexContextMenu();
+    }
+  });
+
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
+    // Hex context menu shortcuts
+    if (!hexContextMenu.classList.contains('hidden')) {
+      if (e.key.toLowerCase() === 'c' && hexMenuPosition) {
+        e.preventDefault();
+        hideHexContextMenu();
+        openNewSessionModal(hexMenuPosition);
+        return;
+      }
+      if (e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        hideHexContextMenu();
+        showToast('Text labels not yet implemented', 'error');
+        return;
+      }
+      if (e.key === 'Escape') {
+        hideHexContextMenu();
+        return;
+      }
+    }
+
     // Number keys 0-9 for session selection
     if (e.key >= '0' && e.key <= '9' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const target = document.activeElement;
@@ -463,7 +533,35 @@ function setupEventHandlers() {
   });
 }
 
-async function openNewSessionModal() {
+function showHexContextMenu(hexPosition: { q: number; r: number }, screenPos: { x: number; y: number }) {
+  hexMenuPosition = hexPosition;
+  hexMenuShowTime = Date.now();
+
+  // Position the menu at click location
+  hexContextMenu.style.left = `${screenPos.x}px`;
+  hexContextMenu.style.top = `${screenPos.y}px`;
+  hexContextMenu.classList.remove('hidden');
+
+  // Adjust if menu goes off screen
+  const rect = hexContextMenu.getBoundingClientRect();
+  const windowWidth = window.innerWidth;
+  const windowHeight = window.innerHeight;
+
+  if (rect.right > windowWidth) {
+    hexContextMenu.style.left = `${screenPos.x - rect.width}px`;
+  }
+  if (rect.bottom > windowHeight) {
+    hexContextMenu.style.top = `${screenPos.y - rect.height}px`;
+  }
+}
+
+function hideHexContextMenu() {
+  hexContextMenu.classList.add('hidden');
+  hexMenuPosition = null;
+}
+
+async function openNewSessionModal(hexPosition?: { q: number; r: number }) {
+  pendingZonePosition = hexPosition || null;
   newSessionModal.classList.remove('hidden');
 
   // Load default path
@@ -502,6 +600,7 @@ function closeNewSessionModal() {
   newSessionModal.classList.add('hidden');
   sessionCwdInput.value = '';
   sessionNameInput.value = '';
+  pendingZonePosition = null;
 }
 
 function updateSessionNameFromPath() {
@@ -516,7 +615,12 @@ async function createSession() {
   const cwd = sessionCwdInput.value || undefined;
   const name = sessionNameInput.value || undefined;
 
-  const options = {
+  const options: {
+    name?: string;
+    cwd?: string;
+    zonePosition?: { q: number; r: number };
+    flags: { continue: boolean; skipPermissions: boolean; chrome: boolean };
+  } = {
     name,
     cwd,
     flags: {
@@ -525,6 +629,11 @@ async function createSession() {
       chrome: sessionOptChrome.checked,
     },
   };
+
+  // Include zone position if clicking on empty hex
+  if (pendingZonePosition) {
+    options.zonePosition = pendingZonePosition;
+  }
 
   try {
     modalCreate.textContent = 'Creating...';

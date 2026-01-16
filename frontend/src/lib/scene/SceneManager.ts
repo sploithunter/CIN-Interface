@@ -8,7 +8,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { ManagedSession, VibecraftEvent } from '../../types';
 import { SessionZone } from './SessionZone';
 import { ParticleSystem } from './ParticleSystem';
-import { hexToWorld, findNextAvailableHex, getOccupiedHexes, HEX_SIZE } from './HexGrid';
+import { hexToWorld, worldToHex, findNextAvailableHex, getOccupiedHexes, HEX_SIZE } from './HexGrid';
 
 export class SceneManager {
   private container: HTMLElement;
@@ -23,6 +23,8 @@ export class SceneManager {
   private sessionZones: Map<string, SessionZone> = new Map();
   private particleSystem: ParticleSystem;
   private gridHelper: THREE.Group;
+  private hexOutlines: Map<string, THREE.LineLoop> = new Map();
+  private hoveredHexKey: string | null = null;
   private ambientLight: THREE.AmbientLight;
   private directionalLight: THREE.DirectionalLight;
 
@@ -35,6 +37,8 @@ export class SceneManager {
 
   // Callbacks
   private onZoneSelect?: (sessionId: string | null) => void;
+  private onEmptyHexClick?: (hexPosition: { q: number; r: number }, screenPos: { x: number; y: number }) => void;
+  private lastMouseEvent: MouseEvent | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -134,11 +138,6 @@ export class SceneManager {
 
   private createHexGridLines(rings: number, hexSize: number): THREE.Group {
     const group = new THREE.Group();
-    const material = new THREE.LineBasicMaterial({
-      color: 0x1e3a5f,
-      transparent: true,
-      opacity: 0.4,
-    });
 
     // Generate hex positions in a spiral pattern
     const hexPositions: Array<{ q: number; r: number }> = [];
@@ -167,15 +166,17 @@ export class SceneManager {
     // Create hex outlines at each position
     for (const pos of hexPositions) {
       const worldPos = hexToWorld(pos);
-      const hexOutline = this.createSingleHexOutline(hexSize, material);
+      const hexOutline = this.createSingleHexOutline(hexSize);
       hexOutline.position.set(worldPos.x, -0.2, worldPos.z);
       group.add(hexOutline);
+      // Store reference for hover highlighting
+      this.hexOutlines.set(`${pos.q},${pos.r}`, hexOutline);
     }
 
     return group;
   }
 
-  private createSingleHexOutline(size: number, material: THREE.LineBasicMaterial): THREE.LineLoop {
+  private createSingleHexOutline(size: number): THREE.LineLoop {
     const points: THREE.Vector3[] = [];
     for (let i = 0; i < 6; i++) {
       const angle = (i / 6) * Math.PI * 2 - Math.PI / 2;
@@ -186,6 +187,12 @@ export class SceneManager {
       ));
     }
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    // Each hex gets its own material so we can highlight individually
+    const material = new THREE.LineBasicMaterial({
+      color: 0x1e3a5f,
+      transparent: true,
+      opacity: 0.4,
+    });
     return new THREE.LineLoop(geometry, material);
   }
 
@@ -195,6 +202,7 @@ export class SceneManager {
   }
 
   private handleMouseMove = (event: MouseEvent): void => {
+    this.lastMouseEvent = event;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -214,15 +222,83 @@ export class SceneManager {
       if (this.hoveredZone) this.hoveredZone.setHovered(false);
       if (newHovered) newHovered.setHovered(true);
       this.hoveredZone = newHovered;
-      this.renderer.domElement.style.cursor = newHovered ? 'pointer' : 'default';
+    }
+
+    // Highlight hovered hex on the grid
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const intersectPoint = new THREE.Vector3();
+    this.raycaster.ray.intersectPlane(groundPlane, intersectPoint);
+
+    if (intersectPoint) {
+      const hexPos = worldToHex(intersectPoint);
+      const hexKey = `${hexPos.q},${hexPos.r}`;
+
+      if (hexKey !== this.hoveredHexKey) {
+        // Unhighlight previous hex
+        if (this.hoveredHexKey) {
+          const prevHex = this.hexOutlines.get(this.hoveredHexKey);
+          if (prevHex) {
+            const mat = prevHex.material as THREE.LineBasicMaterial;
+            mat.color.setHex(0x1e3a5f);
+            mat.opacity = 0.4;
+          }
+        }
+
+        // Highlight new hex
+        const newHex = this.hexOutlines.get(hexKey);
+        if (newHex) {
+          const mat = newHex.material as THREE.LineBasicMaterial;
+          mat.color.setHex(0x3b82f6);
+          mat.opacity = 0.8;
+          this.hoveredHexKey = hexKey;
+          this.renderer.domElement.style.cursor = 'pointer';
+        } else {
+          this.hoveredHexKey = null;
+          this.renderer.domElement.style.cursor = newHovered ? 'pointer' : 'default';
+        }
+      }
+    }
+
+    // Set cursor based on whether hovering zone or empty hex
+    if (newHovered || this.hoveredHexKey) {
+      this.renderer.domElement.style.cursor = 'pointer';
+    } else {
+      this.renderer.domElement.style.cursor = 'default';
     }
   };
 
-  private handleClick = (): void => {
+  private handleClick = (event: MouseEvent): void => {
+    // Update mouse coordinates from click event
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
     if (this.hoveredZone) {
       const sessionId = this.hoveredZone.getSessionId();
       this.selectZone(sessionId);
       this.onZoneSelect?.(sessionId);
+    } else {
+      // Check if clicked on ground plane (empty hex area)
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const intersectPoint = new THREE.Vector3();
+      this.raycaster.ray.intersectPlane(groundPlane, intersectPoint);
+
+      if (intersectPoint) {
+        // Convert world position to hex coordinates
+        const hexPos = worldToHex(intersectPoint);
+        // Check if this hex is unoccupied
+        const isOccupied = Array.from(this.sessionZones.values()).some(zone => {
+          const pos = zone.getPosition();
+          const zoneHex = worldToHex(pos);
+          return zoneHex.q === hexPos.q && zoneHex.r === hexPos.r;
+        });
+
+        if (!isOccupied) {
+          const screenPos = { x: event.clientX, y: event.clientY };
+          this.onEmptyHexClick?.(hexPos, screenPos);
+        }
+      }
     }
   };
 
@@ -403,6 +479,10 @@ export class SceneManager {
 
   setOnZoneSelect(callback: (sessionId: string | null) => void): void {
     this.onZoneSelect = callback;
+  }
+
+  setOnEmptyHexClick(callback: (hexPosition: { q: number; r: number }, screenPos: { x: number; y: number }) => void): void {
+    this.onEmptyHexClick = callback;
   }
 
   focusOnCenter(): void {
