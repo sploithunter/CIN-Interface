@@ -1,0 +1,1 @@
+{"version":3,"file":"defaults.js","sourceRoot":"","sources":["../../src/shared/defaults.ts"],"names":[],"mappings":"AAAA;;;;;GAKG;AAEH,MAAM,CAAC,MAAM,QAAQ,GAAG;IACtB,gCAAgC;IAChC,WAAW,EAAE,IAAI;IAEjB,2BAA2B;IAC3B,WAAW,EAAE,IAAI;IAEjB;;;;;OAKG;IACH,WAAW,EAAE,gCAAgC;IAE7C;;;OAGG;IACH,aAAa,EAAE,iCAAiC;IAEhD,mCAAmC;IACnC,UAAU,EAAE,IAAI;IAEhB,wBAAwB;IACxB,YAAY,EAAE,QAAQ;CACd,CAAC"}

@@ -7,9 +7,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
-// ============================================================================
-// GitStatusManager
-// ============================================================================
 export class GitStatusManager {
     statusCache = new Map();
     directories = new Map(); // sessionId -> directory
@@ -18,7 +15,6 @@ export class GitStatusManager {
     // Configuration
     POLL_INTERVAL_MS = 5000; // Poll every 5 seconds
     EXEC_TIMEOUT_MS = 5000; // Timeout for git commands
-    constructor() { }
     /**
      * Set callback for status updates
      */
@@ -148,7 +144,7 @@ export class GitStatusManager {
             isRepo: true,
         };
         // Run all git commands in parallel
-        const [branchResult, statusResult, diffStagedResult, diffUnstagedResult, logResult,] = await Promise.all([
+        const [branchResult, statusResult, diffStagedResult, diffUnstagedResult, logResult] = await Promise.all([
             this.execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory).catch(() => ''),
             this.execGit(['status', '--porcelain'], directory).catch(() => ''),
             this.execGit(['diff', '--cached', '--shortstat'], directory).catch(() => ''),
@@ -207,8 +203,11 @@ export class GitStatusManager {
         status.linesRemoved = stagedDiff.removed + unstagedDiff.removed;
         // Total files
         status.totalFiles =
-            status.staged.added + status.staged.modified + status.staged.deleted +
-                status.unstaged.modified + status.unstaged.deleted +
+            status.staged.added +
+                status.staged.modified +
+                status.staged.deleted +
+                status.unstaged.modified +
+                status.unstaged.deleted +
                 status.untracked;
         // Parse last commit
         if (logResult) {
@@ -230,3 +229,4 @@ export class GitStatusManager {
         return stdout;
     }
 }
+//# sourceMappingURL=GitStatusManager.js.map

@@ -1,5 +1,5 @@
 /**
- * Vibecraft - Central Configuration Defaults
+ * CIN-Interface - Central Configuration Defaults
  *
  * Single source of truth for default values.
  * Environment variables override these defaults.
@@ -12,7 +12,7 @@ export const DEFAULTS = {
     /**
      * Events file path.
      * Uses ~/.vibecraft/ to ensure consistent location regardless of
-     * how vibecraft was installed (npx, global npm, local dev).
+     * how the app was installed (npx, global npm, local dev).
      * The ~ is expanded by the server at runtime.
      */
     EVENTS_FILE: '~/.vibecraft/data/events.jsonl',
@@ -26,3 +26,4 @@ export const DEFAULTS = {
     /** tmux session name */
     TMUX_SESSION: 'claude',
 };
+//# sourceMappingURL=defaults.js.map

@@ -6,12 +6,9 @@
  *
  * Data stored in ~/.vibecraft/projects.json
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, } from 'fs';
 import { resolve, join, basename, dirname } from 'path';
 import { homedir } from 'os';
-// ============================================================================
-// ProjectsManager
-// ============================================================================
 export class ProjectsManager {
     configDir;
     configFile;
@@ -32,7 +29,7 @@ export class ProjectsManager {
      */
     addProject(path, name) {
         const absPath = resolve(path);
-        const existing = this.projects.find(p => p.path === absPath);
+        const existing = this.projects.find((p) => p.path === absPath);
         if (existing) {
             existing.lastUsed = Date.now();
             existing.useCount++;
@@ -54,7 +51,7 @@ export class ProjectsManager {
      */
     removeProject(path) {
         const absPath = resolve(path);
-        this.projects = this.projects.filter(p => p.path !== absPath);
+        this.projects = this.projects.filter((p) => p.path !== absPath);
         this.save();
     }
     /**
@@ -109,8 +106,8 @@ export class ProjectsManager {
         else {
             // Not browsing - known projects first, then filesystem
             // Re-sort: projects at front
-            const knownPaths = new Set(this.projects.map(p => p.path));
-            const fsOnly = results.filter(r => !knownPaths.has(r));
+            const knownPaths = new Set(this.projects.map((p) => p.path));
+            const fsOnly = results.filter((r) => !knownPaths.has(r));
             results.length = 0;
             results.push(...matchingProjects, ...fsOnly);
         }
@@ -204,3 +201,4 @@ export class ProjectsManager {
         writeFileSync(this.configFile, JSON.stringify(data, null, 2));
     }
 }
+//# sourceMappingURL=ProjectsManager.js.map

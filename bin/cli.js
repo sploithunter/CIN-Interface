@@ -778,8 +778,8 @@ console.log(`Open http://localhost:${port} in your browser`)
 console.log()
 
 // Check for compiled JS (npm package) or fall back to tsx (dev)
-const compiledPath = resolve(ROOT, 'dist/server/server/index.js')
-const sourcePath = resolve(ROOT, 'server/index.ts')
+const compiledPath = resolve(ROOT, 'dist/server/index.js')
+const sourcePath = resolve(ROOT, 'src/server/index.ts')
 
 let server
 if (existsSync(compiledPath)) {

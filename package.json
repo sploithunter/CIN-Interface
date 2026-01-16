@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jason/CIN-Interface"
+    "url": "https://github.com/sploithunter/CIN-Interface"
   },
   "keywords": [
     "claude",
@@ -29,18 +29,14 @@
     "data/.gitkeep"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
-    "dev:client": "vite",
-    "dev:server": "tsx watch server/index.ts",
-    "build": "npm run build:client && npm run build:server",
-    "build:client": "tsc && vite build",
-    "build:server": "tsc -p tsconfig.server.json",
-    "preview": "vite preview",
-    "server": "tsx server/index.ts",
-    "prepack": "npm run build",
-    "prepublishOnly": "npm run build",
-    "deploy": "./scripts/deploy.sh",
-    "release": "./scripts/release.sh"
+    "dev": "tsx watch src/server/index.ts",
+    "dev:server": "tsx watch src/server/index.ts",
+    "build": "tsc",
+    "build:server": "tsc",
+    "start": "node dist/server/index.js",
+    "server": "tsx src/server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",

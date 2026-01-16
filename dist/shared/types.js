@@ -1,12 +1,15 @@
 /**
- * Vibecraft Event Types
+ * CIN-Interface Event Types
  *
  * These types define the contract between:
  * - Hook scripts (produce events)
  * - WebSocket server (relay events)
  * - Three.js client (consume events)
  */
-/** Map tools to stations */
+// =============================================================================
+// Tool-to-Station Mapping
+// =============================================================================
+/** Map tools to stations in the 3D visualization */
 export const TOOL_STATION_MAP = {
     Read: 'bookshelf',
     Write: 'desk',
@@ -25,9 +28,13 @@ export const TOOL_STATION_MAP = {
 export function getStationForTool(tool) {
     return TOOL_STATION_MAP[tool] ?? 'center';
 }
+// =============================================================================
+// Default Config (legacy compatibility)
+// =============================================================================
 export const DEFAULT_CONFIG = {
     serverPort: 4003,
     eventsFile: './data/events.jsonl',
     maxEventsInMemory: 1000,
     debug: false,
 };
+//# sourceMappingURL=types.js.map
