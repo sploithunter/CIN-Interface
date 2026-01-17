@@ -1,5 +1,6 @@
 // Session types
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline';
+export type SessionType = 'internal' | 'external';
 
 export interface GitStatus {
   branch: string;
@@ -25,15 +26,18 @@ export interface ZonePosition {
 export interface ManagedSession {
   id: string;
   name: string;
-  tmuxSession: string;
+  type: SessionType;              // 'internal' = created via New Zone (tmux), 'external' = detected from hooks
+  tmuxSession?: string;           // Only for internal sessions
   status: SessionStatus;
   createdAt: number;
   lastActivity: number;
   cwd?: string;
   claudeSessionId?: string;
   currentTool?: string;
-  zonePosition?: ZonePosition;
+  zonePosition?: ZonePosition;    // If undefined, session is "unplaced" (not on 3D grid)
   gitStatus?: GitStatus;
+  suggestion?: string;            // Claude's suggested next prompt
+  autoAccept?: boolean;           // Ralph Wiggum mode - auto-accept suggestions
 }
 
 export interface Project {
@@ -57,6 +61,7 @@ export interface VibecraftEvent {
   duration?: number;
   success?: boolean;
   assistantText?: string;
+  response?: string;  // Claude's final response text (for stop events)
 }
 
 // WebSocket message types
@@ -137,4 +142,5 @@ export interface CreateSessionOptions {
     skipPermissions?: boolean;
     chrome?: boolean;
   };
+  zonePosition?: ZonePosition;
 }

@@ -54,6 +54,18 @@ class ApiClient {
     return res.json();
   }
 
+  async updateSession(
+    id: string,
+    updates: { name?: string; zonePosition?: { q: number; r: number } | null; autoAccept?: boolean }
+  ): Promise<{ ok: boolean; session?: ManagedSession; error?: string }> {
+    const res = await fetch(`${this.baseUrl}/sessions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    return res.json();
+  }
+
   async restartSession(id: string): Promise<{ ok: boolean; session?: ManagedSession; error?: string }> {
     const res = await fetch(`${this.baseUrl}/sessions/${id}/restart`, {
       method: 'POST',
@@ -72,6 +84,13 @@ class ApiClient {
 
   async cancelSession(sessionId: string): Promise<{ ok: boolean; error?: string }> {
     const res = await fetch(`${this.baseUrl}/sessions/${sessionId}/cancel`, {
+      method: 'POST',
+    });
+    return res.json();
+  }
+
+  async openTerminal(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+    const res = await fetch(`${this.baseUrl}/sessions/${sessionId}/terminal`, {
       method: 'POST',
     });
     return res.json();

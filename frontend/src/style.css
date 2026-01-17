@@ -232,16 +232,17 @@ kbd {
 /* Session cards row */
 .session-cards-row {
   display: flex;
-  flex-direction: row;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
 }
 
 /* Session cards - Vibecraft style */
 .session-card {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 10px 12px;
+  flex: 1 1 calc(50% - 4px);
+  min-width: 120px;
+  max-width: calc(50% - 4px);
+  padding: 8px 10px;
   background: var(--bg-tertiary);
   border-radius: 8px;
   cursor: pointer;
@@ -362,6 +363,39 @@ kbd {
   background: var(--bg-tertiary);
   border-color: var(--accent);
   color: var(--text-primary);
+}
+
+/* External sessions - different border */
+.session-card.external {
+  border-left: 3px solid #8b5cf6;
+}
+
+/* Unplaced sessions (not on 3D grid) */
+.session-card.unplaced {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.session-card.unplaced:hover {
+  opacity: 1;
+}
+
+/* Session type inline tags (in detail line) */
+.session-type-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+  margin-right: 4px;
+}
+
+.session-unplaced-tag {
+  color: #fbbf24;
+  font-weight: 600;
+  opacity: 0.8;
 }
 
 /* Activity Feed */
@@ -961,6 +995,23 @@ kbd {
   color: var(--text-muted);
   border-top: 1px solid var(--border);
   margin-top: 4px;
+}
+
+.hex-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.hex-menu-badge {
+  font-size: 9px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+  margin-left: 4px;
 }
 
 /* Hidden utility */

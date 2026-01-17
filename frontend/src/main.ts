@@ -160,22 +160,50 @@ function formatTokens(n: number): string {
 function renderSessions() {
   const activeCount = sessions.filter(s => s.status !== 'offline').length;
   const workingCount = sessions.filter(s => s.status === 'working').length;
-  allSessionsCount.textContent = activeCount > 0
-    ? `${activeCount} session${activeCount !== 1 ? 's' : ''}, ${workingCount} working`
-    : 'No active sessions';
+  const externalCount = sessions.filter(s => s.type === 'external').length;
 
-  managedSessionsEl.innerHTML = sessions.map((session, index) => `
-    <div class="session-card ${session.status} ${selectedSessionId === session.id ? 'selected' : ''}" data-session="${session.id}">
+  let statusText = '';
+  if (activeCount > 0) {
+    statusText = `${activeCount} session${activeCount !== 1 ? 's' : ''}, ${workingCount} working`;
+    if (externalCount > 0) {
+      statusText += `, ${externalCount} external`;
+    }
+  } else {
+    statusText = 'No active sessions';
+  }
+  allSessionsCount.textContent = statusText;
+
+  // Sort: placed sessions first, then unplaced
+  const sortedSessions = [...sessions].sort((a, b) => {
+    const aPlaced = a.zonePosition ? 1 : 0;
+    const bPlaced = b.zonePosition ? 1 : 0;
+    return bPlaced - aPlaced; // Placed first
+  });
+
+  managedSessionsEl.innerHTML = sortedSessions.map((session, index) => {
+    const isExternal = session.type === 'external';
+    const isUnplaced = !session.zonePosition;
+    const classes = [
+      'session-card',
+      session.status,
+      selectedSessionId === session.id ? 'selected' : '',
+      isExternal ? 'external' : '',
+      isUnplaced ? 'unplaced' : ''
+    ].filter(Boolean).join(' ');
+
+    return `
+    <div class="${classes}" data-session="${session.id}">
       <div class="session-card-header">
         <span class="session-hotkey">${index + 1}</span>
         <span class="session-status-dot ${session.status}"></span>
         <span class="session-name">${escapeHtml(session.name)}</span>
       </div>
       <div class="session-card-detail">
-        ${getSessionStatusText(session)}
+        ${getSessionStatusText(session, isExternal, isUnplaced)}
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   // Add click handlers
   managedSessionsEl.querySelectorAll('.session-card').forEach(el => {
@@ -187,22 +215,26 @@ function renderSessions() {
   updatePromptTarget();
 }
 
-function getSessionStatusText(session: ManagedSession): string {
+function getSessionStatusText(session: ManagedSession, isExternal: boolean = false, isUnplaced: boolean = false): string {
+  // Build type prefix for external/unplaced
+  const typePrefix = isExternal ? '<span class="session-type-tag">ext</span> ' : '';
+  const unplacedSuffix = isUnplaced ? ' <span class="session-unplaced-tag">⊕</span>' : '';
+
   if (session.status === 'waiting') {
-    return '<span class="needs-attention">⚡ Needs attention</span>';
+    return `${typePrefix}<span class="needs-attention">⚡ Needs attention</span>${unplacedSuffix}`;
   }
   if (session.currentTool) {
-    return `<span class="session-tool">${escapeHtml(session.currentTool)}</span> · just now`;
+    return `${typePrefix}<span class="session-tool">${escapeHtml(session.currentTool)}</span>${unplacedSuffix}`;
   }
   if (session.status === 'working') {
-    return 'Working...';
+    return `${typePrefix}Working...${unplacedSuffix}`;
   }
   if (session.status === 'offline') {
-    return 'Offline';
+    return `${typePrefix}Offline${unplacedSuffix}`;
   }
   // Extract folder name from cwd for display
   const folder = session.cwd?.split('/').pop() || 'Idle';
-  return folder;
+  return `${typePrefix}${folder}${unplacedSuffix}`;
 }
 
 function selectSession(sessionId: string | null) {
@@ -221,16 +253,22 @@ function selectSession(sessionId: string | null) {
 }
 
 function updatePromptTarget() {
-  if (selectedSessionId === 'all') {
-    promptTarget.textContent = 'Broadcasting to all sessions';
+  if (selectedSessionId === 'all' || !selectedSessionId) {
+    // "All Sessions" is for viewing only - require specific session to send
+    promptTarget.textContent = 'Select a session to send';
     promptSubmit.disabled = true;
-  } else if (selectedSessionId) {
-    const session = sessions.find(s => s.id === selectedSessionId);
-    promptTarget.textContent = session ? `Sending to: ${session.name}` : 'No session selected';
-    promptSubmit.disabled = !session || session.status === 'offline';
+    promptInput.placeholder = 'Send a prompt to the selected session...';
   } else {
-    promptTarget.textContent = 'No session selected';
-    promptSubmit.disabled = true;
+    const session = sessions.find(s => s.id === selectedSessionId);
+    promptTarget.textContent = session ? `Sending to: ${session.name}` : 'Select a session to send';
+    promptSubmit.disabled = !session || session.status === 'offline';
+
+    // Show suggestion as placeholder if available
+    if (session?.suggestion) {
+      promptInput.placeholder = session.suggestion;
+    } else {
+      promptInput.placeholder = 'Send a prompt to the selected session...';
+    }
   }
 }
 
@@ -256,7 +294,25 @@ function filterEvents(): VibecraftEvent[] {
   const session = sessions.find(s => s.id === selectedSessionId);
   if (!session) return [];
 
-  return events.filter(e => e.sessionId === session.claudeSessionId || e.cwd === session.cwd);
+  return events.filter(e => eventBelongsToSession(e, session));
+}
+
+function eventBelongsToSession(event: VibecraftEvent, session: ManagedSession): boolean {
+  // If session has a Claude session ID, filter strictly by that
+  if (session.claudeSessionId) {
+    return event.sessionId === session.claudeSessionId;
+  }
+
+  // For sessions without claudeSessionId, check CWD but exclude events from other linked sessions
+  if (event.cwd !== session.cwd) return false;
+
+  const otherClaudeSessionIds = new Set(
+    sessions
+      .filter(s => s.id !== session.id && s.claudeSessionId)
+      .map(s => s.claudeSessionId)
+  );
+
+  return !otherClaudeSessionIds.has(event.sessionId);
 }
 
 function renderEvent(event: VibecraftEvent, autoScroll = true) {
@@ -264,7 +320,7 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
   if (selectedSessionId !== 'all') {
     const session = sessions.find(s => s.id === selectedSessionId);
     if (!session) return;
-    if (event.sessionId !== session.claudeSessionId && event.cwd !== session.cwd) return;
+    if (!eventBelongsToSession(event, session)) return;
   }
 
   feedEmpty.classList.add('hidden');
@@ -374,6 +430,10 @@ function formatTime(timestamp: number): string {
 }
 
 function formatEventContent(event: VibecraftEvent): string {
+  // Show Claude's response for stop events (but not subagent_stop to avoid duplication)
+  if (event.type === 'stop' && event.response) {
+    return escapeHtml(truncate(event.response, 500));
+  }
   if (event.assistantText) {
     return escapeHtml(truncate(event.assistantText, 200));
   }
@@ -436,6 +496,17 @@ function setupEventHandlers() {
     await sendPrompt();
   });
 
+  // Tab key fills in the suggestion
+  promptInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab' && !promptInput.value.trim()) {
+      const session = sessions.find(s => s.id === selectedSessionId);
+      if (session?.suggestion) {
+        e.preventDefault();
+        promptInput.value = session.suggestion;
+      }
+    }
+  });
+
   promptCancel.addEventListener('click', async () => {
     if (selectedSessionId && selectedSessionId !== 'all') {
       await api.cancelSession(selectedSessionId);
@@ -487,9 +558,11 @@ function setupEventHandlers() {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       const action = (el as HTMLElement).dataset.action;
-      if (action === 'create-zone' && hexMenuPosition) {
+      // Save position before hiding menu (hideHexContextMenu nulls hexMenuPosition)
+      const savedPosition = hexMenuPosition;
+      if (action === 'create-zone' && savedPosition) {
         hideHexContextMenu();
-        openNewSessionModal(hexMenuPosition);
+        openNewSessionModal(savedPosition);
       } else if (action === 'add-label') {
         // TODO: Implement text label feature
         hideHexContextMenu();
@@ -500,7 +573,8 @@ function setupEventHandlers() {
 
   // Dismiss hex context menu when clicking anywhere else
   document.addEventListener('click', (e) => {
-    if (!hexContextMenu.contains(e.target as Node) && !hexContextMenu.classList.contains('hidden')) {
+    // Only dismiss if menu has been visible for at least 150ms (prevents the opening click from closing it)
+    if (!hexContextMenu.contains(e.target as Node) && !hexContextMenu.classList.contains('hidden') && Date.now() - hexMenuShowTime > 150) {
       hideHexContextMenu();
     }
   });
@@ -517,10 +591,12 @@ function setupEventHandlers() {
   document.addEventListener('keydown', (e) => {
     // Hex context menu shortcuts
     if (!hexContextMenu.classList.contains('hidden')) {
-      if (e.key.toLowerCase() === 'c' && hexMenuPosition) {
+      // Save position before hiding menu (hideHexContextMenu nulls hexMenuPosition)
+      const savedPosition = hexMenuPosition;
+      if (e.key.toLowerCase() === 'c' && savedPosition) {
         e.preventDefault();
         hideHexContextMenu();
-        openNewSessionModal(hexMenuPosition);
+        openNewSessionModal(savedPosition);
         return;
       }
       if (e.key.toLowerCase() === 't') {
@@ -561,6 +637,54 @@ function showHexContextMenu(hexPosition: { q: number; r: number }, screenPos: { 
   hexMenuPosition = hexPosition;
   hexMenuShowTime = Date.now();
 
+  // Find unplaced sessions that can be placed here
+  const unplacedSessions = sessions.filter(s => !s.zonePosition);
+
+  // Build menu content dynamically
+  let menuHtml = `
+    <div class="hex-menu-option" data-action="create-zone">
+      <span class="hex-menu-key">C</span>
+      <span class="hex-menu-label">Create new zone</span>
+    </div>
+  `;
+
+  // Add unplaced sessions as placement options
+  if (unplacedSessions.length > 0) {
+    menuHtml += `<div class="hex-menu-divider"></div>`;
+    unplacedSessions.forEach((session, i) => {
+      const typeBadge = session.type === 'external' ? ' <span class="hex-menu-badge">ext</span>' : '';
+      menuHtml += `
+        <div class="hex-menu-option" data-action="place-session" data-session-id="${session.id}">
+          <span class="hex-menu-key">${i + 1}</span>
+          <span class="hex-menu-label">Place: ${escapeHtml(session.name)}${typeBadge}</span>
+        </div>
+      `;
+    });
+  }
+
+  menuHtml += `<div class="hex-menu-hint">Click elsewhere to dismiss</div>`;
+  hexContextMenu.innerHTML = menuHtml;
+
+  // Re-attach click handlers for the new elements
+  hexContextMenu.querySelectorAll('.hex-menu-option').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const action = (el as HTMLElement).dataset.action;
+      // Save position before hiding menu (hideHexContextMenu nulls hexMenuPosition)
+      const savedPosition = hexMenuPosition;
+      if (action === 'create-zone' && savedPosition) {
+        hideHexContextMenu();
+        openNewSessionModal(savedPosition);
+      } else if (action === 'place-session') {
+        const sessionId = (el as HTMLElement).dataset.sessionId;
+        if (sessionId && savedPosition) {
+          placeSessionAtHex(sessionId, savedPosition);
+        }
+        hideHexContextMenu();
+      }
+    });
+  });
+
   // Position the menu at click location
   hexContextMenu.style.left = `${screenPos.x}px`;
   hexContextMenu.style.top = `${screenPos.y}px`;
@@ -582,6 +706,20 @@ function showHexContextMenu(hexPosition: { q: number; r: number }, screenPos: { 
 function hideHexContextMenu() {
   hexContextMenu.classList.add('hidden');
   hexMenuPosition = null;
+}
+
+async function placeSessionAtHex(sessionId: string, position: { q: number; r: number }) {
+  try {
+    const result = await api.updateSession(sessionId, { zonePosition: position });
+    if (result.ok) {
+      const session = sessions.find(s => s.id === sessionId);
+      showToast(`Placed ${session?.name || 'session'} on grid`, 'success');
+    } else {
+      showToast(result.error || 'Failed to place session', 'error');
+    }
+  } catch (e) {
+    showToast('Failed to place session', 'error');
+  }
 }
 
 async function openNewSessionModal(hexPosition?: { q: number; r: number }) {
@@ -682,7 +820,16 @@ async function createSession() {
 }
 
 async function sendPrompt() {
-  const prompt = promptInput.value.trim();
+  let prompt = promptInput.value.trim();
+
+  // If input is empty, use the suggestion (if available)
+  if (!prompt && selectedSessionId && selectedSessionId !== 'all') {
+    const session = sessions.find(s => s.id === selectedSessionId);
+    if (session?.suggestion) {
+      prompt = session.suggestion;
+    }
+  }
+
   if (!prompt || !selectedSessionId || selectedSessionId === 'all') return;
 
   try {

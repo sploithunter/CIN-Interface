@@ -43,10 +43,17 @@ export interface StopEvent extends BaseEvent {
     stopHookActive: boolean;
     response?: string;
 }
+/** Terminal info for external sessions (captured from environment) */
+export interface TerminalInfo {
+    tmuxPane?: string;
+    tmuxSocket?: string;
+    tty?: string;
+}
 /** Session start event */
 export interface SessionStartEvent extends BaseEvent {
     type: 'session_start';
     source: string;
+    terminal?: TerminalInfo;
 }
 /** Session end event */
 export interface SessionEndEvent extends BaseEvent {
@@ -78,6 +85,7 @@ export interface UnknownEvent extends BaseEvent {
 /** Union of all event types */
 export type VibecraftEvent = PreToolUseEvent | PostToolUseEvent | StopEvent | SessionStartEvent | SessionEndEvent | UserPromptSubmitEvent | NotificationEvent | PreCompactEvent | UnknownEvent;
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline';
+export type SessionType = 'internal' | 'external';
 export interface ZonePosition {
     q: number;
     r: number;
@@ -85,7 +93,8 @@ export interface ZonePosition {
 export interface ManagedSession {
     id: string;
     name: string;
-    tmuxSession: string;
+    type: SessionType;
+    tmuxSession?: string;
     status: SessionStatus;
     createdAt: number;
     lastActivity: number;
@@ -93,16 +102,21 @@ export interface ManagedSession {
     claudeSessionId?: string;
     currentTool?: string;
     zonePosition?: ZonePosition;
+    suggestion?: string;
+    autoAccept?: boolean;
+    terminal?: TerminalInfo;
 }
 export interface SessionFlags {
     continue?: boolean;
     skipPermissions?: boolean;
     chrome?: boolean;
+    openTerminal?: boolean;
 }
 export interface CreateSessionOptions {
     name?: string;
     cwd?: string;
     flags?: SessionFlags;
+    zonePosition?: ZonePosition;
 }
 export interface GitFileChanges {
     added: number;

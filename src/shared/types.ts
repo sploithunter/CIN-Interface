@@ -84,10 +84,18 @@ export interface StopEvent extends BaseEvent {
   response?: string;
 }
 
+/** Terminal info for external sessions (captured from environment) */
+export interface TerminalInfo {
+  tmuxPane?: string;       // TMUX_PANE env var (e.g., "%0")
+  tmuxSocket?: string;     // TMUX env var (socket path)
+  tty?: string;            // Terminal device (e.g., "/dev/ttys001")
+}
+
 /** Session start event */
 export interface SessionStartEvent extends BaseEvent {
   type: 'session_start';
   source: string;
+  terminal?: TerminalInfo;  // Terminal info for potential message sending
 }
 
 /** Session end event */
@@ -139,6 +147,7 @@ export type VibecraftEvent =
 // =============================================================================
 
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline';
+export type SessionType = 'internal' | 'external';
 
 export interface ZonePosition {
   q: number;
@@ -148,26 +157,32 @@ export interface ZonePosition {
 export interface ManagedSession {
   id: string;
   name: string;
-  tmuxSession: string;
+  type: SessionType;              // 'internal' = created via New Zone (tmux), 'external' = detected from hooks
+  tmuxSession?: string;           // Only for internal sessions
   status: SessionStatus;
   createdAt: number;
   lastActivity: number;
   cwd: string;
   claudeSessionId?: string;
   currentTool?: string;
-  zonePosition?: ZonePosition;
+  zonePosition?: ZonePosition;    // If undefined, session is "unplaced" (not on 3D grid)
+  suggestion?: string;            // Claude's suggested next prompt (shown in gray at input line)
+  autoAccept?: boolean;           // Ralph Wiggum mode - auto-accept suggestions
+  terminal?: TerminalInfo;        // Terminal info for external sessions (enables message sending)
 }
 
 export interface SessionFlags {
   continue?: boolean;
   skipPermissions?: boolean;
   chrome?: boolean;
+  openTerminal?: boolean;  // Open Terminal.app attached to tmux session (default: true)
 }
 
 export interface CreateSessionOptions {
   name?: string;
   cwd?: string;
   flags?: SessionFlags;
+  zonePosition?: ZonePosition;
 }
 
 // =============================================================================

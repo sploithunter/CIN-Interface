@@ -282,9 +282,9 @@ export class SceneManager {
       this.raycaster.setFromCamera(this.mouse, this.camera);
       const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
       const intersectPoint = new THREE.Vector3();
-      this.raycaster.ray.intersectPlane(groundPlane, intersectPoint);
+      const intersection = this.raycaster.ray.intersectPlane(groundPlane, intersectPoint);
 
-      if (intersectPoint) {
+      if (intersection) {
         // Convert world position to hex coordinates
         const hexPos = worldToHex(intersectPoint);
         // Check if this hex is unoccupied
@@ -464,12 +464,27 @@ export class SceneManager {
 
     this.selectedZoneId = sessionId;
 
-    // Select new
+    // Update all zones: dim non-selected when something is selected
+    for (const [id, zone] of this.sessionZones) {
+      if (sessionId) {
+        // Something is selected
+        if (id === sessionId) {
+          zone.setSelected(true);
+          zone.setDimmed(false);
+        } else {
+          zone.setSelected(false);
+          zone.setDimmed(true);
+        }
+      } else {
+        // Nothing selected - reset all
+        zone.setSelected(false);
+        zone.setDimmed(false);
+      }
+    }
+
+    // Optionally focus camera on selected zone
     if (sessionId) {
       const zone = this.sessionZones.get(sessionId);
-      zone?.setSelected(true);
-
-      // Optionally focus camera on selected zone
       if (zone) {
         const pos = zone.getPosition();
         this.controls.target.lerp(pos, 0.3);

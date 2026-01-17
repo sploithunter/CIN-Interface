@@ -92,6 +92,15 @@ hook_event_name=$(echo "$input" | "$JQ" -r '.hook_event_name // "unknown"')
 session_id=$(echo "$input" | "$JQ" -r '.session_id // "unknown"')
 cwd=$(echo "$input" | "$JQ" -r '.cwd // ""')
 
+# Capture terminal environment for potential message sending to external sessions
+# If running in tmux, capture the pane info so we can send messages back
+tmux_pane="${TMUX_PANE:-}"
+tmux_socket="${TMUX:-}"
+terminal_tty=$(tty 2>/dev/null || echo "")
+
+# Debug: log terminal info to a file so we can see what the hook receives
+echo "[$(date)] Hook fired: TMUX_PANE='$tmux_pane' TMUX='$tmux_socket' TTY='$terminal_tty' EVENT='$hook_event_name'" >> /tmp/vibecraft-hook-debug.log
+
 # Generate unique event ID and timestamp
 # macOS doesn't support date +%N, so we use different approaches
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -248,13 +257,21 @@ case "$event_type" in
       --arg sessionId "$session_id" \
       --arg cwd "$cwd" \
       --arg source "$source_type" \
+      --arg tmuxPane "$tmux_pane" \
+      --arg tmuxSocket "$tmux_socket" \
+      --arg terminalTty "$terminal_tty" \
       '{
         id: $id,
         timestamp: $timestamp,
         type: $type,
         sessionId: $sessionId,
         cwd: $cwd,
-        source: $source
+        source: $source,
+        terminal: {
+          tmuxPane: $tmuxPane,
+          tmuxSocket: $tmuxSocket,
+          tty: $terminalTty
+        }
       }')
     ;;
 

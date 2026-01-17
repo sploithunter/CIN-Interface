@@ -14,7 +14,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { watch } from 'chokidar';
 import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, unlinkSync, statSync, } from 'fs';
 import { exec, execFile } from 'child_process';
-import { dirname, resolve, join, extname } from 'path';
+import { dirname, resolve, join, extname, basename } from 'path';
 import { hostname } from 'os';
 import { randomUUID, randomBytes } from 'crypto';
 import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
@@ -285,7 +285,8 @@ function pollTokens(tmuxSession) {
 function startTokenPolling() {
     setInterval(() => {
         for (const session of managedSessions.values()) {
-            if (session.status !== 'offline') {
+            // Only poll internal sessions (they have tmuxSession)
+            if (session.status !== 'offline' && session.tmuxSession) {
                 pollTokens(session.tmuxSession);
             }
         }
@@ -432,7 +433,8 @@ function pollPermissions(sessionId, tmuxSession) {
 function startPermissionPolling() {
     setInterval(() => {
         for (const session of managedSessions.values()) {
-            if (session.status !== 'offline') {
+            // Only poll internal sessions (they have tmuxSession)
+            if (session.status !== 'offline' && session.tmuxSession) {
                 pollPermissions(session.id, session.tmuxSession);
             }
         }
@@ -443,6 +445,11 @@ function sendPermissionResponse(sessionId, optionNumber) {
     const session = managedSessions.get(sessionId);
     if (!session) {
         log(`Cannot send permission response: session ${sessionId} not found`);
+        return false;
+    }
+    // Only internal sessions have tmux control
+    if (!session.tmuxSession) {
+        log(`Cannot send permission response: session ${sessionId} is external (no tmux)`);
         return false;
     }
     if (!/^\d+$/.test(optionNumber)) {
@@ -470,16 +477,172 @@ function sendPermissionResponse(sessionId, optionNumber) {
     return true;
 }
 // =============================================================================
+// Suggestion Extraction (Claude's suggested next prompt)
+// =============================================================================
+/**
+ * Extract Claude's suggested next prompt from tmux pane output.
+ * The suggestion appears at the input line in gray text.
+ * We look for the last line that contains a prompt indicator and text after it.
+ */
+function extractSuggestion(output) {
+    const lines = output.split('\n');
+    // Look at the last 10 lines for the input prompt with suggestion
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 10); i--) {
+        const line = lines[i].trim();
+        // Skip empty lines
+        if (!line)
+            continue;
+        // Claude Code prompt patterns:
+        // "❯" (U+276F) or ">" followed by suggestion text
+        // The suggestion is usually the text after the prompt character
+        // Look for a line starting with the prompt character followed by text
+        const promptMatch = line.match(/^[❯>]\s*(.+)$/);
+        if (promptMatch && promptMatch[1]) {
+            let suggestion = promptMatch[1].trim();
+            // Remove trailing status indicators like "↵ send" or "shift+tab to cycle"
+            suggestion = suggestion.replace(/\s*↵\s*send\s*$/i, '').trim();
+            suggestion = suggestion.replace(/\s*shift\+tab to cycle\s*$/i, '').trim();
+            suggestion = suggestion.replace(/\s+$/, '').trim();
+            // Exclude common non-suggestion patterns
+            if (suggestion &&
+                !suggestion.startsWith('[') &&
+                !suggestion.includes('tokens') &&
+                !suggestion.includes('bypass permissions') &&
+                suggestion.length > 2) {
+                return suggestion;
+            }
+        }
+    }
+    return null;
+}
+function pollSuggestions(sessionId, tmuxSession) {
+    try {
+        validateTmuxSession(tmuxSession);
+    }
+    catch {
+        return;
+    }
+    execFile('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', '-20'], { ...EXEC_OPTIONS, maxBuffer: 1024 * 512 }, (error, stdout) => {
+        if (error) {
+            return;
+        }
+        const session = managedSessions.get(sessionId);
+        if (!session)
+            return;
+        // Only look for suggestions when session is waiting or idle
+        // (sessions may timeout to idle while still waiting for input)
+        if (session.status !== 'waiting' && session.status !== 'idle') {
+            if (session.suggestion) {
+                session.suggestion = undefined;
+                broadcastSessions();
+            }
+            return;
+        }
+        const suggestion = extractSuggestion(stdout);
+        // Update if suggestion changed
+        if (suggestion !== session.suggestion) {
+            session.suggestion = suggestion || undefined;
+            debug(`Suggestion for ${session.name}: ${suggestion || '(none)'}`);
+            broadcastSessions();
+        }
+    });
+}
+function startSuggestionPolling() {
+    setInterval(() => {
+        for (const session of managedSessions.values()) {
+            // Poll for suggestions in both 'waiting' and 'idle' sessions
+            // (idle sessions may have timed out but still be waiting for input)
+            // Only internal sessions have tmux to poll from
+            if ((session.status === 'waiting' || session.status === 'idle') && session.tmuxSession) {
+                pollSuggestions(session.id, session.tmuxSession);
+            }
+        }
+    }, 1500); // Poll every 1.5 seconds
+    log(`Suggestion polling started`);
+}
+// =============================================================================
+// Ralph Wiggum Mode (Auto-Accept Suggestions)
+// =============================================================================
+// Track last auto-accept time per session to prevent rapid-fire
+const lastAutoAcceptTime = new Map();
+const AUTO_ACCEPT_COOLDOWN_MS = 3000; // 3 second cooldown between auto-accepts
+function startRalphWiggumPolling() {
+    setInterval(() => {
+        for (const session of managedSessions.values()) {
+            // Check if Ralph Wiggum mode is enabled for this session
+            if (!session.autoAccept)
+                continue;
+            // Only auto-accept for internal sessions that are waiting with a suggestion
+            if (!session.tmuxSession)
+                continue;
+            if (session.status !== 'waiting' && session.status !== 'idle')
+                continue;
+            if (!session.suggestion)
+                continue;
+            // Check cooldown to prevent rapid-fire
+            const lastTime = lastAutoAcceptTime.get(session.id) || 0;
+            const now = Date.now();
+            if (now - lastTime < AUTO_ACCEPT_COOLDOWN_MS)
+                continue;
+            // Auto-accept the suggestion!
+            log(`[Ralph Wiggum] Auto-accepting suggestion for ${session.name}: "${session.suggestion.slice(0, 50)}..."`);
+            lastAutoAcceptTime.set(session.id, now);
+            sendPromptToSession(session.id, session.suggestion).then((result) => {
+                if (result.ok) {
+                    // Clear the suggestion so we don't send it again
+                    session.suggestion = undefined;
+                    session.status = 'working';
+                    broadcastSessions();
+                }
+                else {
+                    log(`[Ralph Wiggum] Failed to auto-accept for ${session.name}: ${result.error}`);
+                }
+            });
+        }
+    }, 2000); // Check every 2 seconds
+    log(`Ralph Wiggum mode polling started`);
+}
+// =============================================================================
 // Session Management
 // =============================================================================
 function shortId() {
     return randomUUID().slice(0, 8);
 }
+/**
+ * Open a Terminal.app window attached to a tmux session (macOS only)
+ */
+function openTerminalForTmux(tmuxSession) {
+    if (process.platform !== 'darwin') {
+        debug('openTerminalForTmux: Not on macOS, skipping');
+        return;
+    }
+    try {
+        validateTmuxSession(tmuxSession);
+    }
+    catch {
+        log(`Invalid tmux session name for terminal: ${tmuxSession}`);
+        return;
+    }
+    // Use osascript to open Terminal.app and attach to the tmux session
+    const script = `
+    tell application "Terminal"
+      activate
+      do script "tmux attach-session -t ${tmuxSession}"
+    end tell
+  `;
+    exec(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, EXEC_OPTIONS, (error) => {
+        if (error) {
+            log(`Failed to open terminal for ${tmuxSession}: ${error.message}`);
+        }
+        else {
+            log(`Opened Terminal.app for session ${tmuxSession}`);
+        }
+    });
+}
 function createSession(options = {}) {
     return new Promise((resolve, reject) => {
         const id = randomUUID();
         sessionCounter++;
-        const name = options.name || `Claude ${sessionCounter}`;
         const tmuxSession = `vibecraft-${shortId()}`;
         let cwd;
         try {
@@ -489,9 +652,13 @@ function createSession(options = {}) {
             reject(err);
             return;
         }
+        // Default name to the directory name (project name)
+        const name = options.name || basename(cwd);
         const flags = options.flags || {};
         const claudeArgs = [];
-        if (flags.continue !== false) {
+        // Don't use -c by default - each new session should start fresh
+        // Otherwise it might continue an existing conversation (like this one!)
+        if (flags.continue === true) {
             claudeArgs.push('-c');
         }
         if (flags.skipPermissions !== false) {
@@ -502,31 +669,48 @@ function createSession(options = {}) {
             claudeArgs.push('--chrome');
         }
         const claudeCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude';
-        // Single-quote the PATH to handle spaces in paths (e.g., VMware Fusion.app)
-        execFile('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd, `PATH='${EXEC_PATH}' ${claudeCmd}`], EXEC_OPTIONS, (error) => {
-            if (error) {
-                log(`Failed to spawn session: ${error.message}`);
-                reject(new Error(`Failed to spawn session: ${error.message}`));
+        // Two-step approach: create session without command, then send claude via send-keys
+        // This prevents the session from closing when Claude exits or has startup issues
+        execFile('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], EXEC_OPTIONS, (createError) => {
+            if (createError) {
+                log(`Failed to create tmux session: ${createError.message}`);
+                reject(new Error(`Failed to create tmux session: ${createError.message}`));
                 return;
             }
-            const session = {
-                id,
-                name,
-                tmuxSession,
-                status: 'idle',
-                createdAt: Date.now(),
-                lastActivity: Date.now(),
-                cwd,
-            };
-            managedSessions.set(id, session);
-            log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession}`);
-            if (cwd) {
-                gitStatusManager.track(id, cwd);
-                projectsManager.addProject(cwd, name);
-            }
-            broadcastSessions();
-            saveSessions();
-            resolve(session);
+            // Now send the Claude command to the session
+            execFile('tmux', ['send-keys', '-t', tmuxSession, claudeCmd, 'Enter'], EXEC_OPTIONS, (sendError) => {
+                if (sendError) {
+                    log(`Failed to send command to session: ${sendError.message}`);
+                    // Kill the empty session since we couldn't start Claude
+                    exec(`tmux kill-session -t ${tmuxSession}`, EXEC_OPTIONS);
+                    reject(new Error(`Failed to start Claude: ${sendError.message}`));
+                    return;
+                }
+                const session = {
+                    id,
+                    name,
+                    type: 'internal',
+                    tmuxSession,
+                    status: 'idle',
+                    createdAt: Date.now(),
+                    lastActivity: Date.now(),
+                    cwd,
+                    zonePosition: options.zonePosition,
+                };
+                managedSessions.set(id, session);
+                log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession}`);
+                if (cwd) {
+                    gitStatusManager.track(id, cwd);
+                    projectsManager.addProject(cwd, name);
+                }
+                // Open Terminal.app attached to the tmux session (default: true)
+                if (flags.openTerminal !== false) {
+                    openTerminalForTmux(tmuxSession);
+                }
+                broadcastSessions();
+                saveSessions();
+                resolve(session);
+            });
         });
     });
 }
@@ -546,8 +730,13 @@ function updateSession(id, updates) {
     if (updates.name) {
         session.name = updates.name;
     }
-    if (updates.zonePosition) {
-        session.zonePosition = updates.zonePosition;
+    // Allow setting zonePosition to place/unplace sessions
+    // null = unplace (remove from grid), object = place at position
+    if ('zonePosition' in updates) {
+        session.zonePosition = updates.zonePosition ?? undefined;
+    }
+    if (typeof updates.autoAccept === 'boolean') {
+        session.autoAccept = updates.autoAccept;
     }
     log(`Updated session: ${session.name} (${id.slice(0, 8)})`);
     broadcastSessions();
@@ -561,18 +750,7 @@ function deleteSession(id) {
             resolve(false);
             return;
         }
-        try {
-            validateTmuxSession(session.tmuxSession);
-        }
-        catch {
-            log(`Invalid tmux session name: ${session.tmuxSession}`);
-            resolve(false);
-            return;
-        }
-        execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, (error) => {
-            if (error) {
-                log(`Warning: Failed to kill tmux session: ${error.message}`);
-            }
+        const cleanup = () => {
             managedSessions.delete(id);
             gitStatusManager.untrack(id);
             for (const [claudeId, managedId] of claudeToManagedMap) {
@@ -584,31 +762,96 @@ function deleteSession(id) {
             broadcastSessions();
             saveSessions();
             resolve(true);
+        };
+        // External sessions have no tmux to kill
+        if (!session.tmuxSession) {
+            cleanup();
+            return;
+        }
+        try {
+            validateTmuxSession(session.tmuxSession);
+        }
+        catch {
+            log(`Invalid tmux session name: ${session.tmuxSession}`);
+            cleanup(); // Still clean up the session record
+            return;
+        }
+        execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, (error) => {
+            if (error) {
+                log(`Warning: Failed to kill tmux session: ${error.message}`);
+            }
+            cleanup();
         });
     });
+}
+/**
+ * Send text to a tmux pane by pane ID (for external sessions running in tmux)
+ */
+async function sendToTmuxPane(tmuxPane, tmuxSocket, text) {
+    // Validate pane ID format (e.g., "%0", "%1", etc.)
+    if (!/^%\d+$/.test(tmuxPane)) {
+        throw new Error(`Invalid tmux pane ID: ${tmuxPane}`);
+    }
+    const tempFile = `/tmp/vibecraft-prompt-${Date.now()}-${randomBytes(16).toString('hex')}.txt`;
+    writeFileSync(tempFile, text);
+    try {
+        // Build tmux args - use socket if provided
+        const socketArgs = tmuxSocket ? ['-S', tmuxSocket.split(',')[0]] : [];
+        await execFileAsync('tmux', [...socketArgs, 'load-buffer', tempFile]);
+        await execFileAsync('tmux', [...socketArgs, 'paste-buffer', '-t', tmuxPane]);
+        await new Promise((r) => setTimeout(r, 100));
+        await execFileAsync('tmux', [...socketArgs, 'send-keys', '-t', tmuxPane, 'Enter']);
+    }
+    finally {
+        try {
+            unlinkSync(tempFile);
+        }
+        catch {
+            // Ignore cleanup errors
+        }
+    }
 }
 async function sendPromptToSession(id, prompt) {
     const session = managedSessions.get(id);
     if (!session) {
         return { ok: false, error: 'Session not found' };
     }
-    try {
-        await sendToTmuxSafe(session.tmuxSession, prompt);
-        session.lastActivity = Date.now();
-        log(`Prompt sent to ${session.name}: ${prompt.slice(0, 50)}...`);
-        return { ok: true };
+    // Internal sessions use their managed tmux session
+    if (session.tmuxSession) {
+        try {
+            await sendToTmuxSafe(session.tmuxSession, prompt);
+            session.lastActivity = Date.now();
+            log(`Prompt sent to ${session.name}: ${prompt.slice(0, 50)}...`);
+            return { ok: true };
+        }
+        catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            log(`Failed to send prompt to ${session.name}: ${msg}`);
+            return { ok: false, error: msg };
+        }
     }
-    catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        log(`Failed to send prompt to ${session.name}: ${msg}`);
-        return { ok: false, error: msg };
+    // External sessions - try to use captured terminal info
+    if (session.terminal?.tmuxPane) {
+        try {
+            await sendToTmuxPane(session.terminal.tmuxPane, session.terminal.tmuxSocket, prompt);
+            session.lastActivity = Date.now();
+            log(`Prompt sent to external ${session.name} via tmux pane ${session.terminal.tmuxPane}: ${prompt.slice(0, 50)}...`);
+            return { ok: true };
+        }
+        catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            log(`Failed to send prompt to external ${session.name}: ${msg}`);
+            return { ok: false, error: msg };
+        }
     }
+    return { ok: false, error: 'Cannot send prompts to this external session (no tmux pane info)' };
 }
 function checkSessionHealth() {
     exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
         if (error) {
+            // Mark only internal sessions as offline (external sessions don't use tmux)
             for (const session of managedSessions.values()) {
-                if (session.status !== 'offline') {
+                if (session.tmuxSession && session.status !== 'offline') {
                     session.status = 'offline';
                 }
             }
@@ -617,6 +860,9 @@ function checkSessionHealth() {
         const activeSessions = new Set(stdout.trim().split('\n'));
         let changed = false;
         for (const session of managedSessions.values()) {
+            // Skip external sessions (they don't have tmux)
+            if (!session.tmuxSession)
+                continue;
             const isAlive = activeSessions.has(session.tmuxSession);
             const newStatus = isAlive
                 ? session.status === 'offline'
@@ -679,6 +925,10 @@ function loadSessions() {
             for (const session of data.sessions) {
                 session.status = 'offline';
                 session.currentTool = undefined;
+                // Migrate old sessions: if they have tmuxSession, they're internal
+                if (!session.type) {
+                    session.type = session.tmuxSession ? 'internal' : 'external';
+                }
                 managedSessions.set(session.id, session);
                 if (session.cwd) {
                     gitStatusManager.track(session.id, session.cwd);
@@ -827,13 +1077,86 @@ function sendVoiceAudio(ws, audioData) {
 // =============================================================================
 function linkClaudeSession(claudeSessionId, managedSessionId) {
     claudeToManagedMap.set(claudeSessionId, managedSessionId);
+    const session = managedSessions.get(managedSessionId);
+    if (session) {
+        session.claudeSessionId = claudeSessionId;
+        log(`Linked Claude session ${claudeSessionId.slice(0, 8)} to ${session.name}`);
+        saveSessions();
+    }
 }
-function findManagedSession(claudeSessionId) {
+function findManagedSession(claudeSessionId, _eventCwd) {
+    // 1. Direct lookup via claudeToManagedMap
     const managedId = claudeToManagedMap.get(claudeSessionId);
     if (managedId) {
         return managedSessions.get(managedId);
     }
+    // 2. Try to find by existing claudeSessionId on sessions
+    for (const session of managedSessions.values()) {
+        if (session.claudeSessionId === claudeSessionId) {
+            // Re-establish the map entry
+            claudeToManagedMap.set(claudeSessionId, session.id);
+            return session;
+        }
+    }
+    // NOTE: We intentionally do NOT fall back to CWD matching here.
+    // This keeps internal (tmux-managed) and external sessions separate.
+    // External sessions are auto-created in findOrCreateExternalSession().
     return undefined;
+}
+/**
+ * Find existing session or auto-create an external session for unknown Claude sessions.
+ * External sessions appear in the sidebar but are not placed on the 3D grid initially.
+ */
+function findOrCreateExternalSession(claudeSessionId, eventCwd, terminalInfo) {
+    // First try normal lookup by Claude session ID
+    const existing = findManagedSession(claudeSessionId);
+    if (existing) {
+        // Update terminal info if provided (e.g., from session_start event)
+        if (terminalInfo && existing.type === 'external') {
+            existing.terminal = terminalInfo;
+            if (terminalInfo.tmuxPane) {
+                log(`Updated terminal info for ${existing.name}: tmux pane ${terminalInfo.tmuxPane}`);
+            }
+        }
+        return existing;
+    }
+    // Check if there's an internal session with matching CWD that doesn't have a Claude ID yet.
+    // This handles the case where we just created an internal session and Claude is starting up.
+    for (const session of managedSessions.values()) {
+        if (session.type === 'internal' &&
+            session.cwd === eventCwd &&
+            !session.claudeSessionId) {
+            // Link this Claude session to the internal session
+            session.claudeSessionId = claudeSessionId;
+            claudeToManagedMap.set(claudeSessionId, session.id);
+            log(`Linked Claude session ${claudeSessionId.slice(0, 8)} to internal session ${session.name}`);
+            saveSessions();
+            return session;
+        }
+    }
+    // Auto-create external session for this unknown Claude session
+    const id = randomUUID();
+    const dirName = eventCwd.split('/').pop() || 'External';
+    const session = {
+        id,
+        name: dirName,
+        type: 'external',
+        // No tmuxSession for external sessions
+        status: 'working',
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        cwd: eventCwd,
+        claudeSessionId,
+        terminal: terminalInfo,
+        // No zonePosition - external sessions are unplaced initially
+    };
+    managedSessions.set(id, session);
+    claudeToManagedMap.set(claudeSessionId, id);
+    const tmuxInfo = terminalInfo?.tmuxPane ? ` (tmux: ${terminalInfo.tmuxPane})` : '';
+    log(`Auto-created external session: ${session.name} (Claude: ${claudeSessionId.slice(0, 8)})${tmuxInfo}`);
+    broadcastSessions();
+    saveSessions();
+    return session;
 }
 // =============================================================================
 // Event Processing
@@ -871,7 +1194,22 @@ function addEvent(event) {
     if (events.length > MAX_EVENTS) {
         events.splice(0, events.length - MAX_EVENTS);
     }
-    const managedSession = findManagedSession(event.sessionId);
+    // Extract terminal info from session_start events (for external session control)
+    let terminalInfo;
+    if (event.type === 'session_start') {
+        const startEvent = event;
+        if (startEvent.terminal) {
+            // Only capture if there's useful info (tmux pane or tty)
+            const { tmuxPane, tmuxSocket, tty } = startEvent.terminal;
+            if (tmuxPane || tty) {
+                terminalInfo = { tmuxPane, tmuxSocket, tty };
+            }
+        }
+    }
+    // Find or auto-create session for this event
+    // Internal sessions are found by Claude session ID mapping
+    // External sessions are auto-created when we see an unknown Claude session
+    const managedSession = findOrCreateExternalSession(event.sessionId, event.cwd, terminalInfo);
     if (managedSession) {
         const prevStatus = managedSession.status;
         managedSession.lastActivity = Date.now();
@@ -889,6 +1227,10 @@ function addEvent(event) {
                 managedSession.currentTool = undefined;
                 break;
             case 'stop':
+                // Claude finished responding - waiting for next user input (NEEDS ATTENTION!)
+                managedSession.status = 'waiting';
+                managedSession.currentTool = undefined;
+                break;
             case 'session_end':
                 managedSession.status = 'idle';
                 managedSession.currentTool = undefined;
@@ -1147,6 +1489,7 @@ async function handleHttpRequest(req, res) {
         try {
             const body = await collectRequestBody(req);
             const options = body ? JSON.parse(body) : {};
+            log(`Creating session with options: ${JSON.stringify(options)}`);
             const session = await createSession(options);
             res.writeHead(201, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true, session }));
@@ -1216,6 +1559,12 @@ async function handleHttpRequest(req, res) {
                 res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
                 return;
             }
+            // External sessions can't be cancelled via tmux
+            if (!session.tmuxSession) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Cannot cancel external sessions' }));
+                return;
+            }
             try {
                 validateTmuxSession(session.tmuxSession);
             }
@@ -1245,6 +1594,12 @@ async function handleHttpRequest(req, res) {
                 res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
                 return;
             }
+            // External sessions can't be restarted via tmux
+            if (!session.tmuxSession) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Cannot restart external sessions' }));
+                return;
+            }
             // Validate inputs to prevent command injection
             try {
                 validateTmuxSession(session.tmuxSession);
@@ -1266,44 +1621,65 @@ async function handleHttpRequest(req, res) {
                 }));
                 return;
             }
+            const tmuxSessionName = session.tmuxSession; // TypeScript now knows this is string
             // Kill existing tmux session if it exists (ignore errors)
-            execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, () => {
-                // Respawn tmux session with claude using execFile
-                // Single-quote the PATH to handle spaces in paths (e.g., VMware Fusion.app)
-                execFile('tmux', [
-                    'new-session',
-                    '-d',
-                    '-s',
-                    session.tmuxSession,
-                    '-c',
-                    cwd,
-                    `PATH='${EXEC_PATH}' claude -c --permission-mode=bypassPermissions --dangerously-skip-permissions`,
-                ], EXEC_OPTIONS, (error) => {
-                    if (error) {
+            execFile('tmux', ['kill-session', '-t', tmuxSessionName], EXEC_OPTIONS, () => {
+                // Two-step approach: create session without command, then send claude via send-keys
+                execFile('tmux', ['new-session', '-d', '-s', tmuxSessionName, '-c', cwd], EXEC_OPTIONS, (createError) => {
+                    if (createError) {
                         res.writeHead(500, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${error.message}` }));
+                        res.end(JSON.stringify({ ok: false, error: `Failed to create session: ${createError.message}` }));
                         return;
                     }
-                    session.status = 'idle';
-                    session.lastActivity = Date.now();
-                    session.claudeSessionId = undefined;
-                    session.currentTool = undefined;
-                    // Clear old linking
-                    for (const [claudeId, managedId] of claudeToManagedMap) {
-                        if (managedId === session.id) {
-                            claudeToManagedMap.delete(claudeId);
+                    // Send the Claude command to the session
+                    const claudeCmd = 'claude --permission-mode=bypassPermissions --dangerously-skip-permissions';
+                    execFile('tmux', ['send-keys', '-t', tmuxSessionName, claudeCmd, 'Enter'], EXEC_OPTIONS, (sendError) => {
+                        if (sendError) {
+                            // Kill the empty session since we couldn't start Claude
+                            exec(`tmux kill-session -t ${tmuxSessionName}`, EXEC_OPTIONS);
+                            res.writeHead(500, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${sendError.message}` }));
+                            return;
                         }
-                    }
-                    log(`Restarted session: ${session.name} (${session.id.slice(0, 8)})`);
-                    broadcastSessions();
-                    saveSessions();
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: true, session }));
+                        session.status = 'idle';
+                        session.lastActivity = Date.now();
+                        session.claudeSessionId = undefined;
+                        session.currentTool = undefined;
+                        // Clear old linking
+                        for (const [claudeId, managedId] of claudeToManagedMap) {
+                            if (managedId === session.id) {
+                                claudeToManagedMap.delete(claudeId);
+                            }
+                        }
+                        log(`Restarted session: ${session.name} (${session.id.slice(0, 8)})`);
+                        broadcastSessions();
+                        saveSessions();
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ ok: true, session }));
+                    });
                 });
             });
             return;
         }
-        // PATCH /sessions/:id - Update session name or zone position
+        // POST /sessions/:id/terminal - Open Terminal.app attached to tmux session
+        if (req.method === 'POST' && action === 'terminal') {
+            const session = getSession(sessionId);
+            if (!session) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
+                return;
+            }
+            if (!session.tmuxSession) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Cannot open terminal for external sessions' }));
+                return;
+            }
+            openTerminalForTmux(session.tmuxSession);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+            return;
+        }
+        // PATCH /sessions/:id - Update session name, zone position, or autoAccept
         if (req.method === 'PATCH' && !action) {
             const session = getSession(sessionId);
             if (!session) {
@@ -1324,6 +1700,41 @@ async function handleHttpRequest(req, res) {
             }
             return;
         }
+    }
+    // GET /projects - List known project directories
+    if (req.method === 'GET' && req.url === '/projects') {
+        const projects = projectsManager.getProjects();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, projects }));
+        return;
+    }
+    // GET /projects/autocomplete?q=<partial> - Autocomplete directory paths
+    if (req.method === 'GET' && req.url?.startsWith('/projects/autocomplete')) {
+        const urlObj = new URL(req.url, `http://localhost:${PORT}`);
+        const partial = urlObj.searchParams.get('q') || '';
+        const limit = parseInt(urlObj.searchParams.get('limit') || '15', 10);
+        const suggestions = projectsManager.autocomplete(partial, limit);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, suggestions }));
+        return;
+    }
+    // GET /projects/default - Get a sensible default project directory
+    if (req.method === 'GET' && req.url === '/projects/default') {
+        const projects = projectsManager.getProjects();
+        let defaultPath;
+        if (projects.length > 0) {
+            // Use most recently used project
+            defaultPath = projects[0].path;
+        }
+        else {
+            // Fall back to ~/Documents or home directory
+            const home = process.env.HOME || '';
+            const documentsDir = `${home}/Documents`;
+            defaultPath = existsSync(documentsDir) ? documentsDir : home;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, path: defaultPath }));
+        return;
     }
     // GET /tiles
     if (req.method === 'GET' && req.url === '/tiles') {
@@ -1448,6 +1859,8 @@ function main() {
         log(`  Sessions: http://localhost:${PORT}/sessions`);
         startTokenPolling();
         startPermissionPolling();
+        startSuggestionPolling();
+        startRalphWiggumPolling();
         setInterval(checkSessionHealth, 5000);
         setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS);
         checkSessionHealth();

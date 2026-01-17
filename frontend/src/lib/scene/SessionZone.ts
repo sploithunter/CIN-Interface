@@ -65,7 +65,7 @@ export class SessionZone {
   private toolLabel: THREE.Sprite | null = null;
   private fileLabels: THREE.Sprite[] = [];
   private recentFiles: string[] = [];
-  private stations: Map<string, THREE.Mesh> = new Map();
+  private stations: Map<string, THREE.Object3D> = new Map();
   private activeStation: string | null = null;
 
   // Animation
@@ -228,54 +228,14 @@ export class SessionZone {
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
 
-      const mesh = this.createStationMesh(type);
-      mesh.position.set(x, HEX_HEIGHT / 2 + 0.25, z);
-      this.stations.set(type, mesh);
-      this.group.add(mesh);
+      const station = this.createStation(type);
+      station.position.set(x, HEX_HEIGHT / 2, z);
+      this.stations.set(type, station);
+      this.group.add(station);
     });
   }
 
-  private createStationMesh(type: string): THREE.Mesh {
-    let geometry: THREE.BufferGeometry;
-
-    switch (type) {
-      case 'terminal':
-        // Robot-like box
-        geometry = new THREE.BoxGeometry(0.4, 0.5, 0.3);
-        break;
-      case 'bookshelf':
-        // Tall shelf
-        geometry = new THREE.BoxGeometry(0.35, 0.55, 0.2);
-        break;
-      case 'desk':
-        // Flat desk
-        geometry = new THREE.BoxGeometry(0.5, 0.2, 0.35);
-        break;
-      case 'workbench':
-        // Work surface
-        geometry = new THREE.BoxGeometry(0.45, 0.25, 0.35);
-        break;
-      case 'scanner':
-        // Scanner device
-        geometry = new THREE.CylinderGeometry(0.15, 0.2, 0.35, 8);
-        break;
-      case 'antenna':
-        // Antenna cone
-        geometry = new THREE.ConeGeometry(0.18, 0.5, 8);
-        break;
-      case 'portal':
-        // Portal ring
-        geometry = new THREE.TorusGeometry(0.22, 0.06, 8, 16);
-        break;
-      case 'taskboard':
-        // Board
-        geometry = new THREE.BoxGeometry(0.4, 0.45, 0.08);
-        break;
-      default:
-        geometry = new THREE.SphereGeometry(0.2, 12, 12);
-    }
-    this.geometries.push(geometry);
-
+  private createStationMaterial(type: string): THREE.MeshStandardMaterial {
     const color = STATION_COLORS[type] || STATION_COLORS.center;
     const material = new THREE.MeshStandardMaterial({
       color: color,
@@ -285,8 +245,464 @@ export class SessionZone {
       roughness: 0.5,
     });
     this.materials.push(material);
+    return material;
+  }
 
+  private createStation(type: string): THREE.Object3D {
+    const color = STATION_COLORS[type] || STATION_COLORS.center;
+    const material = this.createStationMaterial(type);
+
+    switch (type) {
+      case 'terminal':
+        return this.createTerminalStation(material);
+      case 'bookshelf':
+        return this.createBookshelfStation(material);
+      case 'desk':
+        return this.createDeskStation(material);
+      case 'workbench':
+        return this.createWorkbenchStation(material);
+      case 'scanner':
+        return this.createScannerStation(material);
+      case 'antenna':
+        return this.createAntennaStation(material);
+      case 'portal':
+        return this.createPortalStation(material);
+      case 'taskboard':
+        return this.createTaskboardStation(material);
+      default:
+        return this.createDefaultStation(material);
+    }
+  }
+
+  // Terminal: Computer monitor on a stand (Bash)
+  private createTerminalStation(material: THREE.MeshStandardMaterial): THREE.Group {
+    const group = new THREE.Group();
+
+    // Monitor screen (main box)
+    const screenGeo = new THREE.BoxGeometry(0.4, 0.3, 0.05);
+    this.geometries.push(screenGeo);
+    const screen = new THREE.Mesh(screenGeo, material);
+    screen.position.y = 0.35;
+    screen.castShadow = true;
+    group.add(screen);
+
+    // Monitor bezel (darker frame)
+    const bezelMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a2e,
+      metalness: 0.7,
+      roughness: 0.3,
+    });
+    this.materials.push(bezelMat);
+    const bezelGeo = new THREE.BoxGeometry(0.44, 0.34, 0.03);
+    this.geometries.push(bezelGeo);
+    const bezel = new THREE.Mesh(bezelGeo, bezelMat);
+    bezel.position.set(0, 0.35, -0.02);
+    bezel.castShadow = true;
+    group.add(bezel);
+
+    // Stand neck
+    const neckGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.15, 8);
+    this.geometries.push(neckGeo);
+    const neck = new THREE.Mesh(neckGeo, bezelMat);
+    neck.position.y = 0.1;
+    group.add(neck);
+
+    // Stand base
+    const baseGeo = new THREE.CylinderGeometry(0.12, 0.14, 0.03, 12);
+    this.geometries.push(baseGeo);
+    const base = new THREE.Mesh(baseGeo, bezelMat);
+    base.position.y = 0.015;
+    group.add(base);
+
+    return group;
+  }
+
+  // Bookshelf: Shelf with books (Read)
+  private createBookshelfStation(_material: THREE.MeshStandardMaterial): THREE.Group {
+    const group = new THREE.Group();
+
+    // Shelf frame (dark wood color)
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0x3d2817,
+      metalness: 0.1,
+      roughness: 0.8,
+    });
+    this.materials.push(woodMat);
+
+    // Side panels
+    const sideGeo = new THREE.BoxGeometry(0.04, 0.55, 0.2);
+    this.geometries.push(sideGeo);
+    const leftSide = new THREE.Mesh(sideGeo, woodMat);
+    leftSide.position.set(-0.18, 0.275, 0);
+    leftSide.castShadow = true;
+    group.add(leftSide);
+
+    const rightSide = new THREE.Mesh(sideGeo, woodMat);
+    rightSide.position.set(0.18, 0.275, 0);
+    rightSide.castShadow = true;
+    group.add(rightSide);
+
+    // Shelves
+    const shelfGeo = new THREE.BoxGeometry(0.32, 0.02, 0.18);
+    this.geometries.push(shelfGeo);
+    [0.02, 0.2, 0.38, 0.54].forEach((y) => {
+      const shelf = new THREE.Mesh(shelfGeo, woodMat);
+      shelf.position.set(0, y, 0);
+      group.add(shelf);
+    });
+
+    // Books (colored rectangles on shelves)
+    const bookColors = [0x8b5cf6, 0x6366f1, 0xa855f7, 0x7c3aed];
+    [0.1, 0.29, 0.47].forEach((shelfY, si) => {
+      for (let i = 0; i < 4; i++) {
+        const bookGeo = new THREE.BoxGeometry(0.06, 0.14 + Math.random() * 0.03, 0.12);
+        this.geometries.push(bookGeo);
+        const bookMat = new THREE.MeshStandardMaterial({
+          color: bookColors[(i + si) % bookColors.length],
+          emissive: bookColors[(i + si) % bookColors.length],
+          emissiveIntensity: 0.2,
+        });
+        this.materials.push(bookMat);
+        const book = new THREE.Mesh(bookGeo, bookMat);
+        book.position.set(-0.1 + i * 0.065, shelfY, 0);
+        book.castShadow = true;
+        group.add(book);
+      }
+    });
+
+    return group;
+  }
+
+  // Desk: Table with paper (Write/NotebookEdit)
+  private createDeskStation(material: THREE.MeshStandardMaterial): THREE.Group {
+    const group = new THREE.Group();
+
+    // Desk top
+    const topGeo = new THREE.BoxGeometry(0.5, 0.04, 0.35);
+    this.geometries.push(topGeo);
+    const top = new THREE.Mesh(topGeo, material);
+    top.position.y = 0.28;
+    top.castShadow = true;
+    group.add(top);
+
+    // Desk legs
+    const legMat = new THREE.MeshStandardMaterial({
+      color: 0x2d3748,
+      metalness: 0.6,
+      roughness: 0.4,
+    });
+    this.materials.push(legMat);
+    const legGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.26, 6);
+    this.geometries.push(legGeo);
+
+    [[-0.2, -0.13], [0.2, -0.13], [-0.2, 0.13], [0.2, 0.13]].forEach(([x, z]) => {
+      const leg = new THREE.Mesh(legGeo, legMat);
+      leg.position.set(x, 0.13, z);
+      group.add(leg);
+    });
+
+    // Paper on desk
+    const paperGeo = new THREE.BoxGeometry(0.2, 0.005, 0.28);
+    this.geometries.push(paperGeo);
+    const paperMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      emissive: 0xf8fafc,
+      emissiveIntensity: 0.1,
+    });
+    this.materials.push(paperMat);
+    const paper = new THREE.Mesh(paperGeo, paperMat);
+    paper.position.set(0.05, 0.305, 0);
+    group.add(paper);
+
+    return group;
+  }
+
+  // Workbench: Work table with tool (Edit)
+  private createWorkbenchStation(material: THREE.MeshStandardMaterial): THREE.Group {
+    const group = new THREE.Group();
+
+    // Workbench top (thicker)
+    const topGeo = new THREE.BoxGeometry(0.5, 0.06, 0.4);
+    this.geometries.push(topGeo);
+    const top = new THREE.Mesh(topGeo, material);
+    top.position.y = 0.23;
+    top.castShadow = true;
+    group.add(top);
+
+    // Sturdy legs
+    const legMat = new THREE.MeshStandardMaterial({
+      color: 0x374151,
+      metalness: 0.7,
+      roughness: 0.3,
+    });
+    this.materials.push(legMat);
+    const legGeo = new THREE.BoxGeometry(0.04, 0.2, 0.04);
+    this.geometries.push(legGeo);
+
+    [[-0.2, -0.15], [0.2, -0.15], [-0.2, 0.15], [0.2, 0.15]].forEach(([x, z]) => {
+      const leg = new THREE.Mesh(legGeo, legMat);
+      leg.position.set(x, 0.1, z);
+      group.add(leg);
+    });
+
+    // Wrench/tool on top
+    const toolMat = new THREE.MeshStandardMaterial({
+      color: 0x9ca3af,
+      metalness: 0.9,
+      roughness: 0.2,
+    });
+    this.materials.push(toolMat);
+
+    // Tool handle
+    const handleGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.2, 6);
+    this.geometries.push(handleGeo);
+    const handle = new THREE.Mesh(handleGeo, toolMat);
+    handle.rotation.z = Math.PI / 2;
+    handle.position.set(0, 0.28, 0.05);
+    group.add(handle);
+
+    // Tool head
+    const headGeo = new THREE.BoxGeometry(0.06, 0.02, 0.08);
+    this.geometries.push(headGeo);
+    const head = new THREE.Mesh(headGeo, toolMat);
+    head.position.set(0.12, 0.28, 0.05);
+    group.add(head);
+
+    return group;
+  }
+
+  // Scanner: Radar dish (Grep/Glob)
+  private createScannerStation(material: THREE.MeshStandardMaterial): THREE.Group {
+    const group = new THREE.Group();
+
+    // Base
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      metalness: 0.6,
+      roughness: 0.4,
+    });
+    this.materials.push(baseMat);
+    const baseGeo = new THREE.CylinderGeometry(0.12, 0.15, 0.08, 12);
+    this.geometries.push(baseGeo);
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.y = 0.04;
+    group.add(base);
+
+    // Neck/stem
+    const neckGeo = new THREE.CylinderGeometry(0.025, 0.03, 0.2, 8);
+    this.geometries.push(neckGeo);
+    const neck = new THREE.Mesh(neckGeo, baseMat);
+    neck.position.y = 0.18;
+    group.add(neck);
+
+    // Dish (half sphere/parabolic shape)
+    const dishGeo = new THREE.SphereGeometry(0.15, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    this.geometries.push(dishGeo);
+    const dish = new THREE.Mesh(dishGeo, material);
+    dish.rotation.x = Math.PI;
+    dish.position.y = 0.35;
+    dish.castShadow = true;
+    group.add(dish);
+
+    // Antenna in center of dish
+    const antennaGeo = new THREE.ConeGeometry(0.02, 0.1, 6);
+    this.geometries.push(antennaGeo);
+    const antenna = new THREE.Mesh(antennaGeo, material);
+    antenna.position.y = 0.32;
+    group.add(antenna);
+
+    return group;
+  }
+
+  // Antenna: Satellite dish with pole (WebFetch/WebSearch)
+  private createAntennaStation(material: THREE.MeshStandardMaterial): THREE.Group {
+    const group = new THREE.Group();
+
+    // Base
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x374151,
+      metalness: 0.7,
+      roughness: 0.3,
+    });
+    this.materials.push(baseMat);
+    const baseGeo = new THREE.BoxGeometry(0.15, 0.04, 0.15);
+    this.geometries.push(baseGeo);
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.y = 0.02;
+    group.add(base);
+
+    // Main pole
+    const poleGeo = new THREE.CylinderGeometry(0.02, 0.025, 0.4, 8);
+    this.geometries.push(poleGeo);
+    const pole = new THREE.Mesh(poleGeo, baseMat);
+    pole.position.y = 0.24;
+    group.add(pole);
+
+    // Dish
+    const dishGeo = new THREE.CircleGeometry(0.12, 16);
+    this.geometries.push(dishGeo);
+    const dish = new THREE.Mesh(dishGeo, material);
+    dish.rotation.x = -Math.PI / 4;
+    dish.position.set(0, 0.4, 0.06);
+    dish.castShadow = true;
+    group.add(dish);
+
+    // LNB arm
+    const armGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.12, 6);
+    this.geometries.push(armGeo);
+    const arm = new THREE.Mesh(armGeo, baseMat);
+    arm.rotation.x = Math.PI / 4;
+    arm.position.set(0, 0.44, 0.1);
+    group.add(arm);
+
+    // LNB head
+    const lnbGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.04, 8);
+    this.geometries.push(lnbGeo);
+    const lnb = new THREE.Mesh(lnbGeo, material);
+    lnb.position.set(0, 0.48, 0.14);
+    group.add(lnb);
+
+    return group;
+  }
+
+  // Portal: Glowing ring gateway (Task)
+  private createPortalStation(material: THREE.MeshStandardMaterial): THREE.Group {
+    const group = new THREE.Group();
+
+    // Base platform
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x1e1b4b,
+      metalness: 0.5,
+      roughness: 0.5,
+    });
+    this.materials.push(baseMat);
+    const baseGeo = new THREE.CylinderGeometry(0.18, 0.2, 0.04, 16);
+    this.geometries.push(baseGeo);
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.y = 0.02;
+    group.add(base);
+
+    // Portal ring (main)
+    const ringGeo = new THREE.TorusGeometry(0.2, 0.025, 8, 24);
+    this.geometries.push(ringGeo);
+    const ring = new THREE.Mesh(ringGeo, material);
+    ring.position.y = 0.28;
+    ring.castShadow = true;
+    group.add(ring);
+
+    // Inner glow (semi-transparent)
+    const glowMat = new THREE.MeshStandardMaterial({
+      color: material.color,
+      emissive: material.color,
+      emissiveIntensity: 0.5,
+      transparent: true,
+      opacity: 0.3,
+    });
+    this.materials.push(glowMat);
+    const glowGeo = new THREE.CircleGeometry(0.17, 24);
+    this.geometries.push(glowGeo);
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.position.y = 0.28;
+    group.add(glow);
+
+    // Small pillars around base
+    const pillarGeo = new THREE.CylinderGeometry(0.015, 0.02, 0.15, 6);
+    this.geometries.push(pillarGeo);
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const pillar = new THREE.Mesh(pillarGeo, baseMat);
+      pillar.position.set(Math.cos(angle) * 0.14, 0.1, Math.sin(angle) * 0.14);
+      group.add(pillar);
+    }
+
+    return group;
+  }
+
+  // Taskboard: Bulletin board with pins (TodoWrite)
+  private createTaskboardStation(_material: THREE.MeshStandardMaterial): THREE.Group {
+    const group = new THREE.Group();
+
+    // Board backing
+    const boardMat = new THREE.MeshStandardMaterial({
+      color: 0x78350f,
+      metalness: 0.1,
+      roughness: 0.9,
+    });
+    this.materials.push(boardMat);
+    const boardGeo = new THREE.BoxGeometry(0.4, 0.45, 0.03);
+    this.geometries.push(boardGeo);
+    const board = new THREE.Mesh(boardGeo, boardMat);
+    board.position.y = 0.28;
+    board.castShadow = true;
+    group.add(board);
+
+    // Frame
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x44403c,
+      metalness: 0.3,
+      roughness: 0.7,
+    });
+    this.materials.push(frameMat);
+
+    // Frame pieces
+    const topFrameGeo = new THREE.BoxGeometry(0.44, 0.03, 0.04);
+    this.geometries.push(topFrameGeo);
+    const topFrame = new THREE.Mesh(topFrameGeo, frameMat);
+    topFrame.position.set(0, 0.52, 0.01);
+    group.add(topFrame);
+
+    const bottomFrame = new THREE.Mesh(topFrameGeo, frameMat);
+    bottomFrame.position.set(0, 0.04, 0.01);
+    group.add(bottomFrame);
+
+    const sideFrameGeo = new THREE.BoxGeometry(0.03, 0.45, 0.04);
+    this.geometries.push(sideFrameGeo);
+    const leftFrame = new THREE.Mesh(sideFrameGeo, frameMat);
+    leftFrame.position.set(-0.22, 0.28, 0.01);
+    group.add(leftFrame);
+
+    const rightFrame = new THREE.Mesh(sideFrameGeo, frameMat);
+    rightFrame.position.set(0.22, 0.28, 0.01);
+    group.add(rightFrame);
+
+    // Sticky notes / cards
+    const noteColors = [0xfef08a, 0xfde047, 0xfbbf24, 0xf59e0b];
+    const noteGeo = new THREE.BoxGeometry(0.1, 0.1, 0.005);
+    this.geometries.push(noteGeo);
+
+    const notePositions = [
+      [-0.1, 0.38], [0.05, 0.4], [-0.05, 0.2], [0.1, 0.18]
+    ];
+    notePositions.forEach(([x, y], i) => {
+      const noteMat = new THREE.MeshStandardMaterial({
+        color: noteColors[i % noteColors.length],
+        emissive: noteColors[i % noteColors.length],
+        emissiveIntensity: 0.1,
+      });
+      this.materials.push(noteMat);
+      const note = new THREE.Mesh(noteGeo, noteMat);
+      note.position.set(x, y, 0.02);
+      note.rotation.z = (Math.random() - 0.5) * 0.2;
+      group.add(note);
+    });
+
+    // Stand
+    const standGeo = new THREE.BoxGeometry(0.04, 0.2, 0.15);
+    this.geometries.push(standGeo);
+    const stand = new THREE.Mesh(standGeo, frameMat);
+    stand.position.set(0, -0.05, -0.06);
+    stand.rotation.x = -0.2;
+    group.add(stand);
+
+    return group;
+  }
+
+  // Default: Simple sphere
+  private createDefaultStation(material: THREE.MeshStandardMaterial): THREE.Mesh {
+    const geometry = new THREE.SphereGeometry(0.15, 12, 12);
+    this.geometries.push(geometry);
     const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.y = 0.15;
     mesh.castShadow = true;
     return mesh;
   }
@@ -701,8 +1117,7 @@ export class SessionZone {
 
     const station = this.stations.get(stationType);
     if (station) {
-      const mat = station.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 1.0;
+      this.setStationEmissive(station, 1.0);
       station.scale.setScalar(1.3);
     }
   }
@@ -717,10 +1132,20 @@ export class SessionZone {
   private deactivateStation(type: string): void {
     const station = this.stations.get(type);
     if (station) {
-      const mat = station.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.3;
+      this.setStationEmissive(station, 0.3);
       station.scale.setScalar(1.0);
     }
+  }
+
+  private setStationEmissive(obj: THREE.Object3D, intensity: number): void {
+    if ((obj as THREE.Mesh).isMesh) {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.material && (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity !== undefined) {
+        (mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
+      }
+    }
+    // Recursively apply to children (for Groups)
+    obj.children.forEach(child => this.setStationEmissive(child, intensity));
   }
 
   setHovered(hovered: boolean): void {
@@ -734,6 +1159,43 @@ export class SessionZone {
   setSelected(selected: boolean): void {
     this.isSelected = selected;
     this.targetScale = selected ? 1.02 : this.isHovered ? 1.04 : 1.0;
+
+    // Update edge glow for selection state
+    const glowMat = this.edgeGlow.material as THREE.MeshBasicMaterial;
+    const tubeMat = this.edgeTube.material as THREE.MeshBasicMaterial;
+
+    if (selected) {
+      // Brighten selected zone significantly
+      glowMat.opacity = 0.85;
+      tubeMat.opacity = 1.0;
+    } else {
+      // Reset to status-based glow
+      const glow = STATUS_GLOW[this.session.status] || STATUS_GLOW.idle;
+      glowMat.opacity = glow * 0.4;
+      tubeMat.opacity = 0.8;
+    }
+  }
+
+  // Dim non-selected zones when another zone is selected
+  setDimmed(dimmed: boolean): void {
+    if (this.isSelected) return; // Never dim selected zone
+
+    const glowMat = this.edgeGlow.material as THREE.MeshBasicMaterial;
+    const tubeMat = this.edgeTube.material as THREE.MeshBasicMaterial;
+    const hexMat = this.hexMesh.material as THREE.MeshStandardMaterial;
+
+    if (dimmed) {
+      // Very dim - make non-selected zones fade into background
+      glowMat.opacity = 0.08;
+      tubeMat.opacity = 0.25;
+      hexMat.opacity = 0.5;
+    } else {
+      // Reset to status-based glow
+      const glow = STATUS_GLOW[this.session.status] || STATUS_GLOW.idle;
+      glowMat.opacity = glow * 0.4;
+      tubeMat.opacity = 0.8;
+      hexMat.opacity = 1.0;
+    }
   }
 
   update(delta: number, elapsed: number): void {
