@@ -84,3 +84,4 @@
 - Added `cin-interface` as CLI command (alongside `vibecraft` for backward compatibility)
 - Expand/collapse for long responses in activity feed (> 500 chars shows preview + "Show full response")
 - Map minimize/maximize toggle button and M keyboard shortcut (preference saved in localStorage)
+- Fixed expand/collapse to show full content height (removed max-height constraint)

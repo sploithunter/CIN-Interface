@@ -650,9 +650,13 @@ kbd {
 }
 
 .feed-item-full {
-  max-height: 400px;
+  max-height: none;
+  overflow: visible;
   white-space: pre-wrap;
   word-break: break-word;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  padding: 8px;
 }
 
 .feed-item-full .feed-item-content {
