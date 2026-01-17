@@ -38,6 +38,8 @@ const aboutModal = document.getElementById('about-modal')!;
 const notConnectedOverlay = document.getElementById('not-connected-overlay')!;
 const retryConnectionBtn = document.getElementById('retry-connection')!;
 const canvasContainer = document.getElementById('canvas-container')!;
+const toggleMapBtn = document.getElementById('toggle-map-btn')!;
+const appEl = document.getElementById('app')!;
 
 // Modal elements
 const sessionCwdInput = document.getElementById('session-cwd-input') as HTMLInputElement;
@@ -67,6 +69,9 @@ let hexMenuShowTime = 0;
 // Initialize
 async function init() {
   console.log('[CIN] Initializing...');
+
+  // Load saved preferences
+  loadMapPreference();
 
   // Initialize 3D scene
   if (canvasContainer) {
@@ -560,6 +565,21 @@ function scrollToBottom() {
   activityFeed.scrollTop = activityFeed.scrollHeight;
 }
 
+// Map minimize/maximize
+function toggleMapMinimized() {
+  const isMinimized = appEl.classList.toggle('map-minimized');
+  localStorage.setItem('mapMinimized', isMinimized ? 'true' : 'false');
+  // Trigger resize for any canvas elements
+  window.dispatchEvent(new Event('resize'));
+}
+
+function loadMapPreference() {
+  const saved = localStorage.getItem('mapMinimized');
+  if (saved === 'true') {
+    appEl.classList.add('map-minimized');
+  }
+}
+
 // Event handlers
 function setupEventHandlers() {
   // All sessions row
@@ -581,6 +601,9 @@ function setupEventHandlers() {
   // About
   aboutBtn.addEventListener('click', () => aboutModal.classList.remove('hidden'));
   aboutClose.addEventListener('click', () => aboutModal.classList.add('hidden'));
+
+  // Toggle map button
+  toggleMapBtn.addEventListener('click', toggleMapMinimized);
 
   // Retry connection
   retryConnectionBtn.addEventListener('click', () => ws.connect());
@@ -736,6 +759,13 @@ function setupEventHandlers() {
       newSessionModal.classList.add('hidden');
       settingsModal.classList.add('hidden');
       aboutModal.classList.add('hidden');
+    }
+
+    // M key to toggle map
+    if (e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const target = document.activeElement;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      toggleMapMinimized();
     }
   });
 }

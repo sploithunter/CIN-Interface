@@ -43,7 +43,7 @@
 ### High Priority
 - [x] Replace Vibecraft references with CIN-Interface throughout codebase (user-facing strings updated; ~/.vibecraft paths kept for backward compatibility)
 - [x] Add expand/collapse for large responses in activity feed
-- [ ] Add option to minimize 3D map and maximize chat/activity interface
+- [x] Add option to minimize 3D map and maximize chat/activity interface
 
 ### Medium Priority
 - [ ] Permission prompt handling in web UI
@@ -83,3 +83,4 @@
 - Rebranded user-facing strings from Vibecraft to CIN-Interface (data paths unchanged for compatibility)
 - Added `cin-interface` as CLI command (alongside `vibecraft` for backward compatibility)
 - Expand/collapse for long responses in activity feed (> 500 chars shows preview + "Show full response")
+- Map minimize/maximize toggle button and M keyboard shortcut (preference saved in localStorage)

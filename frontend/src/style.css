@@ -152,6 +152,40 @@ kbd {
   gap: 12px;
 }
 
+.feed-toggle-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.feed-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-secondary);
+}
+
+/* Map minimized state */
+#app.map-minimized #scene-panel {
+  display: none;
+}
+
+#app.map-minimized #feed-panel {
+  width: 100%;
+  border-left: none;
+}
+
+#app.map-minimized .feed-toggle-btn {
+  transform: rotate(180deg);
+}
+
 .connection-status {
   font-size: 12px;
   color: var(--text-muted);
