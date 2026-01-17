@@ -1851,7 +1851,7 @@ function main() {
     httpServer.listen(PORT, () => {
         log(`Server running on port ${PORT}`);
         log(``);
-        log(`Open https://vibecraft.sh to view your workshop`);
+        log(`Open http://localhost:${PORT} to view your interface`);
         log(``);
         log(`Local API endpoints:`);
         log(`  WebSocket: ws://localhost:${PORT}`);

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Vibeshop CLI - 3D visualization for Claude Code
+ * CIN-Interface CLI - 3D visualization for Claude Code
  *
  * Usage:
- *   npx vibecraft          # Start the server
- *   npx vibecraft --help   # Show help
+ *   npx cin-interface          # Start the server
+ *   npx cin-interface --help   # Show help
  */
 
 // Check if cwd exists (common issue when running from deleted directory)
@@ -16,7 +16,7 @@ try {
   console.error('This happens when the directory you ran the command from was deleted.')
   console.error('\nFix: cd to a valid directory first:')
   console.error('  cd ~')
-  console.error('  npx vibecraft setup')
+  console.error('  npx cin-interface setup')
   process.exit(1)
 }
 
@@ -95,7 +95,7 @@ function printHealthCheck() {
 
   if (!hooksResult.configured) {
     warnings.push(`  [!] Hooks not configured - events won't be captured
-      Run: npx vibecraft setup
+      Run: npx cin-interface setup
       Then restart Claude Code`)
   }
 
@@ -111,13 +111,13 @@ const args = process.argv.slice(2)
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
-vibecraft - 3D visualization for Claude Code
+cin-interface - 3D visualization for Claude Code
 
 Usage:
-  vibecraft [options]
-  vibecraft setup         Configure Claude Code hooks automatically
-  vibecraft uninstall     Remove vibecraft hooks (keeps your data)
-  vibecraft doctor        Diagnose common issues
+  cin-interface [options]
+  cin-interface setup         Configure Claude Code hooks automatically
+  cin-interface uninstall     Remove hooks (keeps your data)
+  cin-interface doctor        Diagnose common issues
 
 Options:
   --port, -p <port>    WebSocket server port (default: 4003)
@@ -130,12 +130,11 @@ Environment Variables:
   VIBECRAFT_DEBUG      Enable debug logging (true/false)
 
 Setup:
-  1. Run: vibecraft setup
-  2. Start server: vibecraft
-  3. Open frontend in browser
+  1. Run: cin-interface setup
+  2. Start server: cin-interface
+  3. Open http://localhost:4003 in browser
 
-Website: https://vibecraft.sh
-GitHub:  https://github.com/Elysian-Labs/vibecraft
+GitHub:  https://github.com/sploithunter/CIN-Interface
 `)
   process.exit(0)
 }
@@ -150,7 +149,7 @@ if (args.includes('--hook-path')) {
 if (args[0] === 'setup') {
   const { writeFileSync, copyFileSync, chmodSync } = await import('fs')
 
-  console.log('Setting up vibecraft hooks...\n')
+  console.log('Setting up CIN-Interface hooks...\n')
 
   // ==========================================================================
   // Step 1: Find Claude Code settings
@@ -339,14 +338,14 @@ if (args[0] === 'setup') {
   if (serverRunning) {
     // Update scenario
     console.log('\nTo complete the update:')
-    console.log('  1. Restart vibecraft server (Ctrl+C, then run: npx vibecraft)')
+    console.log('  1. Restart CIN-Interface server (Ctrl+C, then run: npx cin-interface)')
     console.log('  2. Restart Claude Code (for hook changes to take effect)')
     console.log('  3. Refresh browser\n')
   } else {
     // Fresh install scenario
     console.log('\nNext steps:')
     console.log('  1. Restart Claude Code (required for hooks to take effect)')
-    console.log('  2. Run: npx vibecraft')
+    console.log('  2. Run: npx cin-interface')
     console.log('  3. Open http://localhost:4003 in your browser\n')
   }
 
@@ -357,7 +356,7 @@ if (args[0] === 'setup') {
 if (args[0] === 'uninstall') {
   const { writeFileSync, rmSync } = await import('fs')
 
-  console.log('Uninstalling vibecraft hooks...\n')
+  console.log('Uninstalling CIN-Interface hooks...\n')
 
   // ==========================================================================
   // Step 1: Find Claude Code settings
@@ -475,7 +474,7 @@ if (args[0] === 'uninstall') {
   console.log('Uninstall complete!')
   console.log('='.repeat(50))
 
-  console.log('\nVibecraft hooks have been removed.')
+  console.log('\nCIN-Interface hooks have been removed.')
   console.log('Your data is preserved in ~/.vibecraft/data/')
   console.log('\nTo remove all data:')
   console.log('  rm -rf ~/.vibecraft')
@@ -487,7 +486,7 @@ if (args[0] === 'uninstall') {
 // Doctor command - diagnose common issues
 if (args[0] === 'doctor') {
   console.log('='.repeat(50))
-  console.log('Vibecraft Doctor - Diagnosing your setup...')
+  console.log('CIN-Interface Doctor - Diagnosing your setup...')
   console.log('='.repeat(50))
   console.log()
 
@@ -564,7 +563,7 @@ if (args[0] === 'doctor') {
     }
   } else {
     console.log(`  ✗ Hook script not found: ${hookScript}`)
-    issues.push('Hook script not installed. Run: npx vibecraft setup')
+    issues.push('Hook script not installed. Run: npx cin-interface setup')
   }
 
   // -------------------------------------------------------------------------
@@ -587,7 +586,7 @@ if (args[0] === 'doctor') {
 
   if (!settingsPath) {
     console.log('  ✗ No Claude settings file found')
-    issues.push('Claude settings not found. Run: npx vibecraft setup')
+    issues.push('Claude settings not found. Run: npx cin-interface setup')
   } else {
     console.log(`  ✓ Settings file: ${settingsPath}`)
 
@@ -620,7 +619,7 @@ if (args[0] === 'doctor') {
         warnings.push(`Some hooks not configured: ${missingHooks.join(', ')}`)
       } else {
         console.log('  ✗ No vibecraft hooks configured')
-        issues.push('Hooks not configured. Run: npx vibecraft setup')
+        issues.push('Hooks not configured. Run: npx cin-interface setup')
       }
     } catch (e) {
       console.log(`  ✗ Failed to parse settings: ${e.message}`)
@@ -661,7 +660,7 @@ if (args[0] === 'doctor') {
     }
   } else {
     console.log(`  ✗ Data directory not found: ${dataDir}`)
-    issues.push('Data directory not created. Run: npx vibecraft setup')
+    issues.push('Data directory not created. Run: npx cin-interface setup')
   }
 
   // -------------------------------------------------------------------------
@@ -683,7 +682,7 @@ if (args[0] === 'doctor') {
     }
   } catch {
     console.log('  ⚠ Server not running on port 4003')
-    warnings.push('Server not running. Start with: npx vibecraft')
+    warnings.push('Server not running. Start with: npx cin-interface')
   }
 
   // -------------------------------------------------------------------------
@@ -723,7 +722,7 @@ if (args[0] === 'doctor') {
   console.log('\n' + '='.repeat(50))
 
   if (issues.length === 0 && warnings.length === 0) {
-    console.log('✓ All checks passed! Vibecraft should be working.')
+    console.log('✓ All checks passed! CIN-Interface should be working.')
   } else {
     if (issues.length > 0) {
       console.log(`✗ ${issues.length} issue(s) found:\n`)
@@ -743,7 +742,7 @@ if (args[0] === 'doctor') {
 
 if (args.includes('--version') || args.includes('-v')) {
   const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8'))
-  console.log(`vibecraft v${pkg.version}`)
+  console.log(`cin-interface v${pkg.version}`)
   process.exit(0)
 }
 
@@ -764,7 +763,7 @@ if (!existsSync(dataDir)) {
 console.log(`
   ╭─────────────────────────────────────╮
   │                                     │
-  │   vibecraft                          │
+  │   CIN-Interface                     │
   │   3D visualization for Claude Code  │
   │                                     │
   ╰─────────────────────────────────────╯

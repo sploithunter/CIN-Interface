@@ -19,6 +19,7 @@
   ],
   "type": "module",
   "bin": {
+    "cin-interface": "./bin/cli.js",
     "vibecraft": "./bin/cli.js"
   },
   "files": [
@@ -35,6 +36,7 @@
     "build:server": "tsc",
     "start": "node dist/server/index.js",
     "server": "tsx src/server/index.ts",
+    "setup": "node bin/cli.js setup",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

@@ -1,8 +1,10 @@
-# Vibecraft
+# CIN-Interface
 
-3D visualization of Claude Code as an interactive workshop. Watch Claude move between workstations as it uses tools.
+3D visualization interface for Claude Code. Watch and manage your Claude sessions in real-time.
 
-![Three.js](https://img.shields.io/badge/Three.js-black?logo=threedotjs) ![TypeScript](https://img.shields.io/badge/TypeScript-blue?logo=typescript&logoColor=white) ![npm](https://img.shields.io/npm/v/vibecraft)
+> **Note**: This is a fork of [Vibecraft](https://vibecraft.sh) by Elysian Labs. Data is stored in `~/.vibecraft/` for backward compatibility.
+
+![Three.js](https://img.shields.io/badge/Three.js-black?logo=threedotjs) ![TypeScript](https://img.shields.io/badge/TypeScript-blue?logo=typescript&logoColor=white)
 
 ## Requirements
 
@@ -14,108 +16,92 @@
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
-brew install jq tmux       # macOS
-# sudo apt install jq tmux  # Ubuntu/Debian
+# 1. Clone and install
+git clone https://github.com/sploithunter/CIN-Interface
+cd CIN-Interface && npm install
 
 # 2. Configure hooks (one time)
-npx vibecraft setup
+npm run setup
+# OR: node bin/cli.js setup
 
 # 3. Start server
-npx vibecraft
+npm start
+
+# 4. Open http://localhost:4003 in your browser
 ```
 
-Open http://localhost:4003 and use Claude Code normally. You'll see Claude move around the workshop as it uses tools.
-
-**From source:**
-```bash
-git clone https://github.com/Elysian-Labs/vibecraft
-cd vibecraft && npm install && npm run dev
-# Opens on http://localhost:4002
-```
-
-**To uninstall:** `npx vibecraft uninstall` (removes hooks, keeps your data)
-
-## Browser Control (Optional)
-
-Run Claude in tmux to send prompts from browser:
+## Development
 
 ```bash
-tmux new -s claude
-claude
+# Development mode with hot-reload
+npm run dev
+
+# Build TypeScript
+npm run build
+
+# Type check
+npm run typecheck
 ```
-
-Then use the input field in the visualization with "Send to tmux" checked.
-
-## Stations
-
-| Station | Tools | Details |
-|---------|-------|---------|
-| Bookshelf | Read | Books on shelves |
-| Desk | Write | Paper, pencil, ink pot |
-| Workbench | Edit | Wrench, gears, bolts |
-| Terminal | Bash | Glowing screen |
-| Scanner | Grep, Glob | Telescope with lens |
-| Antenna | WebFetch, WebSearch | Satellite dish |
-| Portal | Task (subagents) | Glowing ring portal |
-| Taskboard | TodoWrite | Board with sticky notes |
 
 ## Features
 
-- **Floating context labels** - See file paths and commands above active stations
-- **Thought bubbles** - Claude shows thinking animation while processing
-- **Response capture** - Claude's responses appear in the activity feed
-- **Subagent visualization** - Mini-Claudes spawn at portal for parallel tasks
-- **Cancel button** - Send Ctrl+C to interrupt Claude
-- **Split-screen layout** - 60% 3D scene (Workshop), 40% activity feed
-- **Voice input** - Speak prompts with real-time transcription (requires Deepgram API key)
-- **Attention system** - Zones pulse when sessions need input or finish
-- **Sound effects** - Synthesized audio feedback for tools and events
-- **Draw mode** - Paint hex tiles with colors, 3D stacking, and text labels (press `D`)
-- **Text labels** - Add multi-line labels to hex tiles with custom modal
+### Session Management
+- Create and manage multiple Claude Code sessions
+- Auto-detect external Claude sessions via hooks
+- Send prompts to sessions from web UI or terminal
+- Cancel (Ctrl+C) and restart sessions
+- Session status tracking (idle, working, waiting, offline)
 
-## Orchestration (Multi-Claude)
+### 3D Visualization
+- Hex grid displays sessions as zones
+- Watch Claude move between stations as it uses tools
+- Stations: Bookshelf (Read), Desk (Write), Workbench (Edit), Terminal (Bash), Scanner (Grep/Glob), Antenna (WebFetch), Portal (Task), Taskboard (Todo)
+- Floating context labels show file paths and commands
 
-Run multiple Claude instances and direct work to each:
+### Activity Feed
+- Real-time event stream from Claude Code
+- Filter events by selected session
+- Expandable tool call details
+- Response capture for Claude's final messages
 
-1. Click **"+ New"** (or `Alt+N`) to spawn a new session
-2. Configure name, directory, and flags (`-r`, `--chrome`, `--dangerously-skip-permissions`)
-3. Click a session or press `1-6` (or `Alt+1-6` in inputs) to select it
-4. Send prompts to whichever Claude you want
-
-Each session runs in its own tmux, with status tracking (idle/working/offline).
-
-See [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) for the full API and architecture.
-
-## Keyboard Shortcuts
+### Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| `Tab` / `Esc` | Switch focus between Workshop and Feed |
-| `1-6` | Switch to session (extended: QWERTY, ASDFGH, ZXCVBN) |
-| `0` / `` ` `` | All sessions / overview |
+| `1-6` | Switch to session |
+| `0` | All sessions |
+| `Tab` / `Esc` | Switch focus between scene and feed |
 | `Alt+N` | New session |
-| `Alt+R` | Toggle voice input |
-| `F` | Toggle follow mode |
-| `D` | Toggle draw mode |
+| `Enter` | Submit prompt (Shift+Enter for newline) |
 
-**Draw mode:** `1-6` colors, `0` eraser, `Q/E` brush size, `R` 3D stack, `X` clear
-
-## CLI Options
+## CLI Commands
 
 ```bash
-vibecraft [options]
+cin-interface [options]
+cin-interface setup         # Configure Claude Code hooks
+cin-interface uninstall     # Remove hooks (keeps data)
+cin-interface doctor        # Diagnose common issues
 
 Options:
-  --port, -p <port>    WebSocket server port (default: 4003)
+  --port, -p <port>    Server port (default: 4003)
   --help, -h           Show help
   --version, -v        Show version
 ```
 
-See [docs/SETUP.md](docs/SETUP.md) for detailed setup guide.
-See [CLAUDE.md](CLAUDE.md) for technical documentation.
+## Architecture
 
-Website: https://vibecraft.sh
+See [CLAUDE.md](CLAUDE.md) for detailed technical documentation.
+
+```
+Browser (localhost:4003)
+    │ WebSocket
+    ▼
+Local Server ← hooks/vibecraft-hook.sh ← Claude Code
+    │
+    ├── Session Manager (tmux control)
+    ├── Event Processor (events.jsonl)
+    └── Git Status Manager
+```
 
 ## License
 
