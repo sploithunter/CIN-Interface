@@ -606,6 +606,27 @@ kbd {
   display: block;
 }
 
+/* Response expand/collapse */
+.feed-item-preview.hidden {
+  display: none;
+}
+
+.response-toggle {
+  margin-top: 4px;
+}
+
+.feed-item-full {
+  max-height: 400px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.feed-item-full .feed-item-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
 #feed-scroll-bottom {
   position: absolute;
   bottom: 12px;

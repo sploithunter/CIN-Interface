@@ -384,10 +384,12 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
   const filePath = getFilePath(event);
   const fileHtml = filePath ? `<div class="feed-item-file">${escapeHtml(filePath)}</div>` : '';
 
-  // Check if this event has expandable content (Edit, Write, Read)
-  const hasExpandable = event.tool && ['Edit', 'Write', 'Read'].includes(event.tool) && event.toolInput;
+  // Check if this event has expandable content (Edit, Write, Read tool details)
+  const hasExpandableToolDetails = event.tool && ['Edit', 'Write', 'Read'].includes(event.tool) && event.toolInput;
+  // Check if this event has a long response that should be collapsible
+  const hasLongContent = hasLongResponse(event);
 
-  if (hasExpandable) {
+  if (hasExpandableToolDetails) {
     const content = formatEventContent(event);
     el.innerHTML = `
       <div class="feed-item-header">
@@ -404,6 +406,36 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
     const toggle = el.querySelector('.feed-item-toggle');
     toggle?.addEventListener('click', () => {
       toggle.classList.toggle('expanded');
+    });
+  } else if (hasLongContent) {
+    // Long response - show truncated with expand option
+    const truncatedContent = formatEventContent(event, false);
+    const fullContent = formatEventContent(event, true);
+    el.innerHTML = `
+      <div class="feed-item-header">
+        <span class="feed-item-tool">${toolIcon}${escapeHtml(toolName)}</span>
+        <span class="feed-item-time">${formatTime(event.timestamp)}${duration}</span>
+      </div>
+      ${fileHtml}
+      <div class="feed-item-content feed-item-preview">${truncatedContent}</div>
+      <div class="feed-item-toggle response-toggle">Show full response</div>
+      <div class="feed-item-expandable feed-item-full">
+        <div class="feed-item-content">${fullContent}</div>
+      </div>
+    `;
+    // Add click handler for toggle
+    const toggle = el.querySelector('.feed-item-toggle');
+    toggle?.addEventListener('click', () => {
+      toggle.classList.toggle('expanded');
+      // Update toggle text
+      const previewEl = el.querySelector('.feed-item-preview');
+      if (toggle.classList.contains('expanded')) {
+        toggle.textContent = 'Show less';
+        previewEl?.classList.add('hidden');
+      } else {
+        toggle.textContent = 'Show full response';
+        previewEl?.classList.remove('hidden');
+      }
     });
   } else {
     el.innerHTML = `
@@ -479,18 +511,38 @@ function formatTime(timestamp: number): string {
   return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function formatEventContent(event: VibecraftEvent): string {
+// Thresholds for truncation
+const RESPONSE_TRUNCATE_THRESHOLD = 300;
+const RESPONSE_FULL_THRESHOLD = 500; // Show expand if longer than this
+
+function formatEventContent(event: VibecraftEvent, fullContent = false): string {
   // Show Claude's response for stop events (but not subagent_stop to avoid duplication)
   if (event.type === 'stop' && event.response) {
-    return escapeHtml(truncate(event.response, 500));
+    if (fullContent) {
+      return escapeHtml(event.response);
+    }
+    return escapeHtml(truncate(event.response, RESPONSE_TRUNCATE_THRESHOLD));
   }
   if (event.assistantText) {
+    if (fullContent) {
+      return escapeHtml(event.assistantText);
+    }
     return escapeHtml(truncate(event.assistantText, 200));
   }
   if (event.toolInput) {
     return escapeHtml(truncate(JSON.stringify(event.toolInput), 200));
   }
   return escapeHtml(event.type);
+}
+
+function hasLongResponse(event: VibecraftEvent): boolean {
+  if (event.type === 'stop' && event.response && event.response.length > RESPONSE_FULL_THRESHOLD) {
+    return true;
+  }
+  if (event.assistantText && event.assistantText.length > RESPONSE_FULL_THRESHOLD) {
+    return true;
+  }
+  return false;
 }
 
 function truncate(str: string, maxLen: number): string {
