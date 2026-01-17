@@ -11,6 +11,8 @@
 - [x] Send prompts to sessions via web interface
 - [x] Send prompts via terminal (both work)
 - [x] Cancel sessions (Ctrl+C via tmux)
+- [x] Delete sessions via UI (hover for X button)
+- [x] Restart offline sessions via UI (hover for restart button)
 
 ### Activity Feed
 - [x] Filter events by selected session (uses claudeSessionId when available)
@@ -31,6 +33,8 @@
 - [x] Type badges (EXT for external) in detail line
 - [x] Status indicators (working, idle, offline, needs attention)
 - [x] Git status display per session
+- [x] Enter key submits messages (Shift+Enter for newline)
+- [x] Stop button auto-hides after session stops
 
 ---
 
@@ -38,21 +42,23 @@
 
 ### High Priority
 - [ ] Replace Vibecraft references with CIN-Interface throughout codebase
-- [ ] Enable Enter key to submit messages in prompt input box
-- [ ] Hide Stop button after subagent_stop signal received
-- [ ] Add UI to kill/delete sessions (backend endpoint exists)
-- [ ] Add UI to restart offline sessions (backend endpoint exists)
-
-### Medium Priority
 - [ ] Add expand/collapse for large responses in activity feed
 - [ ] Add option to minimize 3D map and maximize chat/activity interface
+
+### Medium Priority
 - [ ] Permission prompt handling in web UI
+- [ ] Drag and drop images into prompt input (for screenshots)
 
 ### Low Priority / Future
 - [ ] Text labels on hex grid (partially implemented)
 - [ ] Voice input (requires DEEPGRAM_API_KEY)
 - [ ] CIN-API integration (original fork goal)
 - [ ] Deobfuscate/recreate original Vibecraft frontend
+
+### Ambitious Features
+- [ ] Browser preview pane for web development (agent can screenshot it)
+- [ ] Remote management of CIN-Interface
+- [ ] Multi-user support for remote access
 
 ---
 
@@ -70,3 +76,7 @@
 - Response text display for stop events
 - Terminal info capture in hooks for external sessions
 - Session names default to directory name
+- Enter key to submit prompts (Shift+Enter for newline)
+- Stop button auto-hides when session stops
+- Delete button on session cards (hover to reveal)
+- Restart button on offline session cards (hover to reveal)

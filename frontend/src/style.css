@@ -398,6 +398,51 @@ kbd {
   opacity: 0.8;
 }
 
+/* Session card action buttons */
+.session-card-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.session-card:hover .session-card-actions {
+  opacity: 1;
+}
+
+.session-action-btn {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.session-action-btn.restart {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
+.session-action-btn.restart:hover {
+  background: rgba(59, 130, 246, 0.4);
+}
+
+.session-action-btn.delete {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.session-action-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.4);
+}
+
 /* Activity Feed */
 #activity-feed-wrapper {
   flex: 1;

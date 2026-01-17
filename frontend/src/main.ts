@@ -136,6 +136,13 @@ function handleMessage(message: WSMessage) {
       renderEvent(event);
       // Update 3D scene with event
       sceneManager?.handleEvent(event);
+      // Hide Stop button when session stops
+      if (event.type === 'stop' || event.type === 'subagent_stop') {
+        const session = sessions.find(s => s.claudeSessionId === event.sessionId);
+        if (session && session.id === selectedSessionId) {
+          promptCancel.classList.add('hidden');
+        }
+      }
       break;
 
     case 'history':
@@ -191,12 +198,19 @@ function renderSessions() {
       isUnplaced ? 'unplaced' : ''
     ].filter(Boolean).join(' ');
 
+    const canRestart = session.type === 'internal' && session.status === 'offline';
+    const canDelete = true; // Can always delete
+
     return `
     <div class="${classes}" data-session="${session.id}">
       <div class="session-card-header">
         <span class="session-hotkey">${index + 1}</span>
         <span class="session-status-dot ${session.status}"></span>
         <span class="session-name">${escapeHtml(session.name)}</span>
+        <div class="session-card-actions">
+          ${canRestart ? `<button class="session-action-btn restart" data-action="restart" title="Restart session">↻</button>` : ''}
+          ${canDelete ? `<button class="session-action-btn delete" data-action="delete" title="Delete session">×</button>` : ''}
+        </div>
       </div>
       <div class="session-card-detail">
         ${getSessionStatusText(session, isExternal, isUnplaced)}
@@ -207,8 +221,44 @@ function renderSessions() {
 
   // Add click handlers
   managedSessionsEl.querySelectorAll('.session-card').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
+      // Don't select session if clicking action button
+      if ((e.target as HTMLElement).classList.contains('session-action-btn')) {
+        return;
+      }
       selectSession(el.getAttribute('data-session'));
+    });
+  });
+
+  // Add action button handlers
+  managedSessionsEl.querySelectorAll('.session-action-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const card = (btn as HTMLElement).closest('.session-card');
+      const sessionId = card?.getAttribute('data-session');
+      const action = (btn as HTMLElement).dataset.action;
+
+      if (!sessionId) return;
+
+      if (action === 'delete') {
+        const session = sessions.find(s => s.id === sessionId);
+        if (confirm(`Delete session "${session?.name}"?`)) {
+          const result = await api.deleteSession(sessionId);
+          if (result.ok) {
+            showToast(`Deleted ${session?.name}`, 'success');
+          } else {
+            showToast(result.error || 'Failed to delete session', 'error');
+          }
+        }
+      } else if (action === 'restart') {
+        const session = sessions.find(s => s.id === sessionId);
+        const result = await api.restartSession(sessionId);
+        if (result.ok) {
+          showToast(`Restarted ${session?.name}`, 'success');
+        } else {
+          showToast(result.error || 'Failed to restart session', 'error');
+        }
+      }
     });
   });
 
@@ -504,6 +554,11 @@ function setupEventHandlers() {
         e.preventDefault();
         promptInput.value = session.suggestion;
       }
+    }
+    // Enter submits (Shift+Enter for new line)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendPrompt();
     }
   });
 
