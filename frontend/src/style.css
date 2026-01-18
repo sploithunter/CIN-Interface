@@ -399,9 +399,10 @@ kbd {
   color: var(--text-primary);
 }
 
-/* External sessions - different border */
+/* External sessions - use border-left-color to not override dashed style from .unplaced */
 .session-card.external {
-  border-left: 3px solid #8b5cf6;
+  border-left-width: 3px;
+  border-left-color: #8b5cf6;
 }
 
 /* Unplaced sessions (not on 3D grid) */
@@ -452,15 +453,17 @@ kbd {
   color: #a78bfa;
 }
 
-/* Codex session card styling */
+/* Codex session card styling - use border-left-color to not override dashed style */
 .session-card.codex {
-  border-left: 3px solid #10b981;
+  border-left-width: 3px;
+  border-left-color: #10b981;
 }
 
 .session-card.codex.selected {
   background: rgba(16, 185, 129, 0.15);
   border-color: #10b981;
-  border-left: 3px solid #10b981;
+  border-left-width: 3px;
+  border-left-color: #10b981;
 }
 
 /* Session card action buttons */

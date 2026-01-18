@@ -70,6 +70,64 @@ export async function drainMessages(ws: WebSocket, count: number): Promise<any[]
 }
 
 /**
+ * Wait for a WebSocket message of a specific type
+ * Keeps reading messages until it finds one with the matching type or times out
+ */
+export function waitForMessageType(ws: WebSocket, type: string, timeout = 5000): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.removeListener('message', handler);
+      reject(new Error(`Timeout waiting for message type '${type}' (${timeout}ms)`));
+    }, timeout);
+
+    const handler = (data: WebSocket.Data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === type) {
+          clearTimeout(timer);
+          ws.removeListener('message', handler);
+          resolve(msg);
+        }
+        // If not the right type, keep listening
+      } catch {
+        // Ignore parse errors, keep listening
+      }
+    };
+
+    ws.on('message', handler);
+  });
+}
+
+/**
+ * Wait for an event with a specific ID
+ * Keeps reading messages until it finds the matching event or times out
+ */
+export function waitForEventById(ws: WebSocket, eventId: string, timeout = 5000): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.removeListener('message', handler);
+      reject(new Error(`Timeout waiting for event '${eventId}' (${timeout}ms)`));
+    }, timeout);
+
+    const handler = (data: WebSocket.Data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'event' && msg.payload?.id === eventId) {
+          clearTimeout(timer);
+          ws.removeListener('message', handler);
+          resolve(msg);
+        }
+        // If not the right event, keep listening
+      } catch {
+        // Ignore parse errors, keep listening
+      }
+    };
+
+    ws.on('message', handler);
+  });
+}
+
+/**
  * Sleep for specified milliseconds
  */
 export function sleep(ms: number): Promise<void> {

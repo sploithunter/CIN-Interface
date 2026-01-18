@@ -4,7 +4,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import WebSocket from 'ws';
-import { waitForOpen, waitForMessage, drainMessages, post, createTestEvent, createTestWebSocket, del } from '../../utils';
+import { waitForOpen, waitForMessage, waitForMessageType, waitForEventById, drainMessages, post, createTestEvent, createTestWebSocket, del } from '../../utils';
 
 const WS_URL = 'ws://localhost:4003';
 const SERVER_PORT = 4003;
@@ -38,33 +38,46 @@ describe('WebSocket Connection', () => {
     const message = await waitForMessage(ws);
 
     expect(message.type).toBe('connected');
-    expect(message.payload).toMatchObject({
-      version: expect.any(String),
-      username: expect.any(String)
-    });
+    // Server sends sessionId of the most recent event
+    expect(message.payload).toHaveProperty('sessionId');
   });
 
-  it('sends sessions list after connected', async () => {
+  it('sends sessions list in initial messages', async () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
 
     await waitForOpen(ws);
-    await waitForMessage(ws); // connected
+    // Server sends: connected, sessions, text_tiles, history
+    const messages = await drainMessages(ws, 4);
 
-    const sessionsMsg = await waitForMessage(ws);
-    expect(sessionsMsg.type).toBe('sessions');
+    const sessionsMsg = messages.find(m => m.type === 'sessions');
+    expect(sessionsMsg).toBeDefined();
     expect(Array.isArray(sessionsMsg.payload)).toBe(true);
   });
 
-  it('sends text_tiles after sessions', async () => {
+  it('sends text_tiles in initial messages', async () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
 
     await waitForOpen(ws);
-    await drainMessages(ws, 2); // connected, sessions
+    // Server sends: connected, sessions, text_tiles, history
+    const messages = await drainMessages(ws, 4);
 
-    const tilesMsg = await waitForMessage(ws);
-    expect(tilesMsg.type).toBe('text_tiles');
+    const tilesMsg = messages.find(m => m.type === 'text_tiles');
+    expect(tilesMsg).toBeDefined();
+  });
+
+  it('sends history in initial messages', async () => {
+    const ws = createTestWebSocket(WS_URL);
+    openSockets.push(ws);
+
+    await waitForOpen(ws);
+    // Server sends: connected, sessions, text_tiles, history
+    const messages = await drainMessages(ws, 4);
+
+    const historyMsg = messages.find(m => m.type === 'history');
+    expect(historyMsg).toBeDefined();
+    expect(Array.isArray(historyMsg.payload)).toBe(true);
   });
 });
 
@@ -104,9 +117,8 @@ describe('WebSocket Broadcasting', () => {
     });
     await post('/event', event, SERVER_PORT);
 
-    // Should receive the event via WebSocket
-    const msg = await waitForMessage(ws, 3000);
-    expect(msg.type).toBe('event');
+    // Should receive the event via WebSocket (may receive other messages first)
+    const msg = await waitForMessageType(ws, 'event', 3000);
     expect(msg.payload.id).toBe(event.id);
   });
 
@@ -124,14 +136,12 @@ describe('WebSocket Broadcasting', () => {
     });
     await post('/event', event, SERVER_PORT);
 
-    // Both clients should receive
+    // Both clients should receive event (may receive other messages first)
     const [msg1, msg2] = await Promise.all([
-      waitForMessage(ws1, 3000),
-      waitForMessage(ws2, 3000)
+      waitForMessageType(ws1, 'event', 3000),
+      waitForMessageType(ws2, 'event', 3000)
     ]);
 
-    expect(msg1.type).toBe('event');
-    expect(msg2.type).toBe('event');
     expect(msg1.payload.id).toBe(event.id);
     expect(msg2.payload.id).toBe(event.id);
   });

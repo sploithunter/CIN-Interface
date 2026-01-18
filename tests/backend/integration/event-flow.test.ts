@@ -1,18 +1,42 @@
 /**
  * Integration tests for event flow
  * Tests the unified event path: events.jsonl → file watcher → addEvent → broadcast
+ *
+ * IMPORTANT: These tests create external sessions that must be cleaned up.
+ * We use a test-specific prefix to identify and clean up test sessions.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import WebSocket from 'ws';
 import { appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { waitForOpen, waitForMessage, drainMessages, get, createTestWebSocket } from '../../utils';
+import { waitForOpen, waitForEventById, drainMessages, get, del, createTestWebSocket } from '../../utils';
 
 const WS_URL = 'ws://localhost:4003';
 const SERVER_PORT = 4003;
 const EVENTS_FILE = join(homedir(), '.vibecraft/data/events.jsonl');
+
+// Test session prefix for cleanup
+const TEST_PREFIX = '__test_integration__';
+
+/**
+ * Clean up any test sessions created during tests
+ */
+async function cleanupTestSessions(): Promise<void> {
+  const sessionsRes = await get('/sessions', SERVER_PORT);
+  const testSessions = sessionsRes.body.sessions.filter(
+    (s: any) => s.name?.startsWith(TEST_PREFIX) || s.cwd?.includes(TEST_PREFIX)
+  );
+
+  for (const session of testSessions) {
+    try {
+      await del(`/sessions/${session.id}`, SERVER_PORT);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
 
 describe('Event Flow Integration', () => {
   const openSockets: WebSocket[] = [];
@@ -24,6 +48,10 @@ describe('Event Flow Integration', () => {
       }
     }
     openSockets.length = 0;
+  });
+
+  afterAll(async () => {
+    await cleanupTestSessions();
   });
 
   it('file append triggers WebSocket broadcast', async () => {
@@ -40,22 +68,22 @@ describe('Event Flow Integration', () => {
     }
 
     // Append event directly to file (simulating hook script)
+    const eventId = `${TEST_PREFIX}file-flow-${Date.now()}`;
     const event = {
-      id: `file-flow-test-${Date.now()}`,
+      id: eventId,
       type: 'pre_tool_use',
       timestamp: Date.now(),
-      sessionId: 'file-flow-test-session',
-      cwd: '/tmp/file-flow-test',
+      sessionId: `${TEST_PREFIX}session`,
+      cwd: `/tmp/${TEST_PREFIX}file-flow`,
       tool: 'Grep',
       toolInput: { pattern: 'test' }
     };
 
     appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
 
-    // Should receive via WebSocket
-    const msg = await waitForMessage(ws, 3000);
-    expect(msg.type).toBe('event');
-    expect(msg.payload.id).toBe(event.id);
+    // Wait for this specific event by ID (may receive other events first)
+    const msg = await waitForEventById(ws, eventId, 3000);
+    expect(msg.payload.id).toBe(eventId);
   });
 
   it('Codex event with codexThreadId flows correctly', async () => {
@@ -65,13 +93,14 @@ describe('Event Flow Integration', () => {
     await waitForOpen(ws);
     await drainMessages(ws, 4);
 
-    const codexThreadId = `codex-flow-test-${Date.now()}`;
+    const codexThreadId = `${TEST_PREFIX}codex-${Date.now()}`;
+    const eventId = `${TEST_PREFIX}codex-event-${Date.now()}`;
     const event = {
-      id: `codex-event-${Date.now()}`,
+      id: eventId,
       type: 'pre_tool_use',
       timestamp: Date.now(),
       sessionId: codexThreadId,
-      cwd: '/tmp/codex-flow-test',
+      cwd: `/tmp/${TEST_PREFIX}codex-flow`,
       tool: 'shell',
       toolInput: { command: 'ls' },
       codexThreadId: codexThreadId
@@ -79,19 +108,20 @@ describe('Event Flow Integration', () => {
 
     appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
 
-    const msg = await waitForMessage(ws, 3000);
-    expect(msg.type).toBe('event');
+    // Wait for this specific event by ID
+    const msg = await waitForEventById(ws, eventId, 3000);
+    expect(msg.payload.id).toBe(eventId);
     expect(msg.payload.codexThreadId).toBe(codexThreadId);
   });
 
   it('event creates external session if unknown', async () => {
-    const uniqueSessionId = `auto-session-${Date.now()}`;
+    const uniqueSessionId = `${TEST_PREFIX}auto-session-${Date.now()}`;
     const event = {
-      id: `auto-session-event-${Date.now()}`,
+      id: `${TEST_PREFIX}auto-event-${Date.now()}`,
       type: 'session_start',
       timestamp: Date.now(),
       sessionId: uniqueSessionId,
-      cwd: '/tmp/auto-session-test'
+      cwd: `/tmp/${TEST_PREFIX}auto-session`
     };
 
     appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
@@ -111,10 +141,14 @@ describe('Event Flow Integration', () => {
 });
 
 describe('Session State Updates via Events', () => {
+  afterAll(async () => {
+    await cleanupTestSessions();
+  });
+
   it('pre_tool_use sets status to working', async () => {
     const sessionsRes = await get('/sessions', SERVER_PORT);
     const session = sessionsRes.body.sessions.find(
-      (s: any) => s.claudeSessionId && s.type === 'external'
+      (s: any) => s.claudeSessionId && s.type === 'external' && !s.name?.startsWith(TEST_PREFIX)
     );
 
     if (!session) {
@@ -123,7 +157,7 @@ describe('Session State Updates via Events', () => {
     }
 
     const event = {
-      id: `working-test-${Date.now()}`,
+      id: `${TEST_PREFIX}working-${Date.now()}`,
       type: 'pre_tool_use',
       timestamp: Date.now(),
       sessionId: session.claudeSessionId,
@@ -147,7 +181,7 @@ describe('Session State Updates via Events', () => {
   it('stop sets status to waiting', async () => {
     const sessionsRes = await get('/sessions', SERVER_PORT);
     const session = sessionsRes.body.sessions.find(
-      (s: any) => s.claudeSessionId && s.type === 'external'
+      (s: any) => s.claudeSessionId && s.type === 'external' && !s.name?.startsWith(TEST_PREFIX)
     );
 
     if (!session) {
@@ -156,7 +190,7 @@ describe('Session State Updates via Events', () => {
     }
 
     const event = {
-      id: `stop-test-${Date.now()}`,
+      id: `${TEST_PREFIX}stop-${Date.now()}`,
       type: 'stop',
       timestamp: Date.now(),
       sessionId: session.claudeSessionId,
@@ -187,6 +221,10 @@ describe('Event Deduplication', () => {
     openSockets.length = 0;
   });
 
+  afterAll(async () => {
+    await cleanupTestSessions();
+  });
+
   it('duplicate event IDs are not broadcast twice', async () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
@@ -194,13 +232,13 @@ describe('Event Deduplication', () => {
     await waitForOpen(ws);
     await drainMessages(ws, 4);
 
-    const eventId = `dedup-test-${Date.now()}`;
+    const eventId = `${TEST_PREFIX}dedup-${Date.now()}`;
     const event = {
       id: eventId,
       type: 'pre_tool_use',
       timestamp: Date.now(),
-      sessionId: 'dedup-session',
-      cwd: '/tmp',
+      sessionId: `${TEST_PREFIX}dedup-session`,
+      cwd: `/tmp/${TEST_PREFIX}dedup`,
       tool: 'Bash'
     };
 
@@ -208,17 +246,15 @@ describe('Event Deduplication', () => {
     appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
     appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
 
-    // Should only receive once
-    const msg1 = await waitForMessage(ws, 2000);
+    // Wait for the first event
+    const msg1 = await waitForMessageType(ws, 'event', 2000);
     expect(msg1.payload.id).toBe(eventId);
 
     // Second message should timeout or be a different event
     try {
-      const msg2 = await waitForMessage(ws, 1000);
-      // If we got a second message, it shouldn't be the same event
-      if (msg2.type === 'event') {
-        expect(msg2.payload.id).not.toBe(eventId);
-      }
+      const msg2 = await waitForMessageType(ws, 'event', 1000);
+      // If we got a second event, it shouldn't be the same event
+      expect(msg2.payload.id).not.toBe(eventId);
     } catch {
       // Timeout is expected - no duplicate
     }
