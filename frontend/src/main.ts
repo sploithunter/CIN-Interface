@@ -391,6 +391,8 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
 
   // Check if this event has expandable content (Edit, Write, Read tool details)
   const hasExpandableToolDetails = event.tool && ['Edit', 'Write', 'Read'].includes(event.tool) && event.toolInput;
+  // Check if this is a Bash event with output that should be expandable
+  const hasBashOutput = event.tool === 'Bash' && event.toolResponse && hasLongBashOutput(event);
   // Check if this event has a long response that should be collapsible
   const hasLongContent = hasLongResponse(event);
 
@@ -411,6 +413,36 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
     const toggle = el.querySelector('.feed-item-toggle');
     toggle?.addEventListener('click', () => {
       toggle.classList.toggle('expanded');
+    });
+  } else if (hasBashOutput) {
+    // Bash command with expandable output
+    const command = formatBashCommand(event);
+    const truncatedOutput = formatBashOutput(event, false);
+    const fullOutput = formatBashOutput(event, true);
+    el.innerHTML = `
+      <div class="feed-item-header">
+        <span class="feed-item-tool">${toolIcon}${escapeHtml(toolName)}</span>
+        <span class="feed-item-time">${formatTime(event.timestamp)}${duration}</span>
+      </div>
+      <div class="feed-item-command">${command}</div>
+      <div class="feed-item-content feed-item-preview bash-output">${truncatedOutput}</div>
+      <div class="feed-item-toggle bash-toggle">Show full output</div>
+      <div class="feed-item-expandable feed-item-full">
+        <div class="feed-item-content bash-output">${fullOutput}</div>
+      </div>
+    `;
+    // Add click handler for toggle
+    const toggle = el.querySelector('.feed-item-toggle');
+    toggle?.addEventListener('click', () => {
+      toggle.classList.toggle('expanded');
+      const previewEl = el.querySelector('.feed-item-preview');
+      if (toggle.classList.contains('expanded')) {
+        toggle.textContent = 'Show less';
+        previewEl?.classList.add('hidden');
+      } else {
+        toggle.textContent = 'Show full output';
+        previewEl?.classList.remove('hidden');
+      }
     });
   } else if (hasLongContent) {
     // Long response - show truncated with expand option
@@ -548,6 +580,49 @@ function hasLongResponse(event: VibecraftEvent): boolean {
     return true;
   }
   return false;
+}
+
+// Bash output thresholds
+const BASH_OUTPUT_TRUNCATE_THRESHOLD = 200;
+const BASH_OUTPUT_FULL_THRESHOLD = 300;
+
+function hasLongBashOutput(event: VibecraftEvent): boolean {
+  if (!event.toolResponse) return false;
+  const output = getBashOutputText(event.toolResponse);
+  return output.length > BASH_OUTPUT_FULL_THRESHOLD;
+}
+
+function getBashOutputText(toolResponse: unknown): string {
+  if (typeof toolResponse === 'string') {
+    return toolResponse;
+  }
+  if (typeof toolResponse === 'object' && toolResponse !== null) {
+    const resp = toolResponse as Record<string, unknown>;
+    // Handle common response formats
+    if (typeof resp.stdout === 'string') return resp.stdout;
+    if (typeof resp.output === 'string') return resp.output;
+    if (typeof resp.content === 'string') return resp.content;
+    return JSON.stringify(toolResponse);
+  }
+  return String(toolResponse);
+}
+
+function formatBashCommand(event: VibecraftEvent): string {
+  if (!event.toolInput || typeof event.toolInput !== 'object') {
+    return '<span class="bash-prompt">$</span> <span class="bash-cmd">???</span>';
+  }
+  const input = event.toolInput as Record<string, unknown>;
+  const command = typeof input.command === 'string' ? input.command : '???';
+  return `<span class="bash-prompt">$</span> <span class="bash-cmd">${escapeHtml(command)}</span>`;
+}
+
+function formatBashOutput(event: VibecraftEvent, fullContent: boolean): string {
+  if (!event.toolResponse) return '';
+  const output = getBashOutputText(event.toolResponse);
+  if (fullContent) {
+    return escapeHtml(output);
+  }
+  return escapeHtml(truncate(output, BASH_OUTPUT_TRUNCATE_THRESHOLD));
 }
 
 function truncate(str: string, maxLen: number): string {

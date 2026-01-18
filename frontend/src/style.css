@@ -667,6 +667,38 @@ kbd {
   overflow: visible;
 }
 
+/* Bash command and output styles */
+.feed-item-command {
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  margin: 4px 0;
+  color: var(--text-secondary);
+}
+
+.bash-prompt {
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.bash-cmd {
+  color: var(--text);
+}
+
+.bash-output {
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.bash-toggle {
+  margin-top: 4px;
+}
+
 #feed-scroll-bottom {
   position: absolute;
   bottom: 12px;

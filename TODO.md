@@ -44,7 +44,7 @@
 - [x] Replace Vibecraft references with CIN-Interface throughout codebase (user-facing strings updated; ~/.vibecraft paths kept for backward compatibility)
 - [x] Add expand/collapse for large responses in activity feed
 - [x] Add option to minimize 3D map and maximize chat/activity interface
-- [ ] Add expand/collapse for Bash/script output in activity feed
+- [x] Add expand/collapse for Bash/script output in activity feed
 - [ ] Add expand/collapse for agent/subagent actions in activity feed
 - [x] Auto-cleanup stale sessions (detect and remove sessions killed externally)
 
@@ -96,3 +96,4 @@
 - Fixed dev mode static file path resolution (tsx watch now correctly serves from dist/)
 - Added DELETE /sessions/cleanup endpoint to remove all offline sessions
 - Added auto-cleanup for sessions offline > 1 hour (runs every minute)
+- Added expand/collapse for Bash output in activity feed (shows command + truncated output)
