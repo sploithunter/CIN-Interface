@@ -61,10 +61,12 @@
   - [x] Event mapper (Codex events → CIN-Interface format)
   - [x] Add agent type field to sessions and UI
   - [x] Session naming from cwd (with startup reconciliation)
-  - [x] Session health checks (mark offline after 5 min inactivity)
+  - [x] Session health checks (mark offline after 30 min inactivity)
   - [x] Persist codexToManagedMap for session ID stability
-  - Note: Old events from before fix may not display; new events work correctly
-- [x] Auto-remove terminated Codex sessions (2 min to offline, 5 min to delete)
+  - [x] Unified event flow: all events through events.jsonl (single source of truth)
+  - [x] Persist Codex events to events.jsonl (survives server restarts)
+  - [x] Store codexThreadId in events for reliable cross-restart matching
+  - [x] Never auto-delete external sessions (preserves event history matching)
 - [ ] Codex CLI Phase 2: Notify hook for real-time events
 - [ ] Codex CLI Phase 3: SDK integration for internal Codex sessions
 
@@ -123,5 +125,14 @@
   - Codex session health checks (offline after 5 min inactivity)
   - Persist codexToManagedMap for session ID stability across restarts
   - Frontend fallback matching by cwd for Codex events
-  - Persist Codex events to events.jsonl (fixes events lost on server restart)
-  - Store codexThreadId in events for reliable cross-restart matching
+- Unified event architecture:
+  - All events flow through events.jsonl as single source of truth
+  - CodexWatcher writes to file, file watcher processes all events uniformly
+  - Removes duplicate code paths between Claude and Codex event handling
+- Session cleanup policy:
+  - External sessions (Claude/Codex) never auto-deleted (preserves event matching)
+  - Internal sessions auto-cleanup only when tmux process gone (1 hour threshold)
+  - Users can manually delete any session via UI
+- UI improvements:
+  - Both agent tag (CLAUDE/CODEX) and type tag (EXT) shown for external sessions
+  - Updated ARCHITECTURE.md with event flow diagrams and remote access design
