@@ -53,6 +53,12 @@
 - [ ] Drag and drop images into prompt input (research how Claude CLI handles image paths)
 - [ ] File explorer for current repo (view/navigate edited files)
 
+### Agent Integrations
+- [ ] OpenAI Codex CLI integration (first non-Claude agent)
+  - [ ] Research Codex CLI hook system / event format
+  - [ ] Create adapter to translate Codex events to CIN-Interface format
+  - [ ] Add agent type indicator in UI (Claude vs Codex)
+
 ### Low Priority / Future
 - [ ] Text labels on hex grid (partially implemented)
 - [ ] Voice input (requires DEEPGRAM_API_KEY)
