@@ -67,7 +67,12 @@
   - [x] Persist Codex events to events.jsonl (survives server restarts)
   - [x] Store codexThreadId in events for reliable cross-restart matching
   - [x] Never auto-delete external sessions (preserves event history matching)
-- [ ] Codex CLI Phase 2: Notify hook for real-time events
+- [x] Codex CLI Phase 2: Notify hook for real-time events
+  - [x] Create hooks/codex-hook.sh (transforms notify payload to CIN-Interface format)
+  - [x] Add POST /event/codex endpoint to server
+  - [x] Add `setup-codex` CLI command (configures ~/.codex/config.toml)
+  - [x] Update uninstall command to remove Codex hooks
+  - [x] Add Codex checks to doctor command
 - [ ] Codex CLI Phase 3: SDK integration for internal Codex sessions
 
 ### Low Priority / Future
@@ -136,3 +141,9 @@
 - UI improvements:
   - Both agent tag (CLAUDE/CODEX) and type tag (EXT) shown for external sessions
   - Updated ARCHITECTURE.md with event flow diagrams and remote access design
+- Codex Phase 2: Notify hook for instant turn completion events:
+  - Created hooks/codex-hook.sh (receives JSON from Codex notify, transforms to CIN-Interface format)
+  - Added POST /event/codex endpoint for instant event delivery
+  - Added `cin-interface setup-codex` command to configure ~/.codex/config.toml
+  - Updated uninstall command to remove Codex hooks and config
+  - Added Codex configuration checks to doctor command

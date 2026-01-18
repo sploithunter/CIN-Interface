@@ -1686,6 +1686,30 @@ async function handleHttpRequest(req, res) {
         }
         return;
     }
+    // POST /event/codex - Instant notification from Codex notify hook
+    if (req.method === 'POST' && req.url === '/event/codex') {
+        try {
+            const body = await collectRequestBody(req);
+            const event = JSON.parse(body);
+            debug(`Received Codex notify event: ${event.type} for thread ${event.codexThreadId || 'unknown'}`);
+            // The event is already formatted by codex-hook.sh, add it
+            addEvent(event);
+            // Trigger immediate check of Codex session files for this thread
+            // to pick up any detailed events we may have missed
+            const watcher = getCodexWatcher();
+            if (event.codexThreadId && watcher) {
+                watcher.triggerCheckForThread(event.codexThreadId);
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+        }
+        catch (e) {
+            debug(`Failed to parse Codex event: ${e}`);
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        }
+        return;
+    }
     // GET /health
     if (req.method === 'GET' && req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });

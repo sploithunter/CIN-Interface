@@ -111,11 +111,12 @@ const args = process.argv.slice(2)
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
-cin-interface - 3D visualization for Claude Code
+cin-interface - 3D visualization for AI coding agents
 
 Usage:
   cin-interface [options]
   cin-interface setup         Configure Claude Code hooks automatically
+  cin-interface setup-codex   Configure OpenAI Codex CLI notify hook
   cin-interface uninstall     Remove hooks (keeps your data)
   cin-interface doctor        Diagnose common issues
 
@@ -130,9 +131,10 @@ Environment Variables:
   VIBECRAFT_DEBUG      Enable debug logging (true/false)
 
 Setup:
-  1. Run: cin-interface setup
-  2. Start server: cin-interface
-  3. Open http://localhost:4003 in browser
+  1. Run: cin-interface setup (for Claude Code)
+  2. Run: cin-interface setup-codex (for Codex CLI - optional)
+  3. Start server: cin-interface
+  4. Open http://localhost:4003 in browser
 
 GitHub:  https://github.com/sploithunter/CIN-Interface
 `)
@@ -352,6 +354,149 @@ if (args[0] === 'setup') {
   process.exit(0)
 }
 
+// Setup Codex command - configure Codex CLI notify hook
+if (args[0] === 'setup-codex') {
+  const { writeFileSync, copyFileSync, chmodSync } = await import('fs')
+
+  console.log('Setting up CIN-Interface Codex integration...\n')
+
+  // ==========================================================================
+  // Step 1: Install Codex hook script to ~/.vibecraft/hooks/
+  // ==========================================================================
+
+  const vibecraftHooksDir = join(homedir(), '.vibecraft', 'hooks')
+  const installedHookPath = join(vibecraftHooksDir, 'codex-hook.sh')
+  const sourceHookPath = resolve(ROOT, 'hooks/codex-hook.sh')
+
+  // Ensure hooks directory exists
+  if (!existsSync(vibecraftHooksDir)) {
+    mkdirSync(vibecraftHooksDir, { recursive: true })
+    console.log(`Created ${vibecraftHooksDir}`)
+  }
+
+  // Copy hook script
+  if (!existsSync(sourceHookPath)) {
+    console.error(`ERROR: Codex hook script not found at ${sourceHookPath}`)
+    console.error('This is a bug - please report it.')
+    process.exit(1)
+  }
+
+  try {
+    copyFileSync(sourceHookPath, installedHookPath)
+    chmodSync(installedHookPath, 0o755) // Make executable
+    console.log(`Installed hook: ${installedHookPath}`)
+  } catch (e) {
+    console.error(`ERROR: Failed to install hook script: ${e.message}`)
+    process.exit(1)
+  }
+
+  // ==========================================================================
+  // Step 2: Configure ~/.codex/config.toml
+  // ==========================================================================
+
+  const codexConfigDir = join(homedir(), '.codex')
+  const codexConfigPath = join(codexConfigDir, 'config.toml')
+
+  // Ensure .codex directory exists
+  if (!existsSync(codexConfigDir)) {
+    mkdirSync(codexConfigDir, { recursive: true })
+    console.log(`Created ${codexConfigDir}`)
+  }
+
+  // Read existing config or create new
+  let configContent = ''
+  if (existsSync(codexConfigPath)) {
+    configContent = readFileSync(codexConfigPath, 'utf-8')
+    // Backup existing config
+    const backupPath = `${codexConfigPath}.backup-${Date.now()}`
+    writeFileSync(backupPath, configContent)
+    console.log(`Backed up config: ${backupPath}`)
+  }
+
+  // Check if notify is already configured
+  const notifyLineRegex = /^notify\s*=\s*\[/m
+  const hasNotify = notifyLineRegex.test(configContent)
+
+  if (hasNotify) {
+    // Check if our hook is already in the notify array
+    if (configContent.includes('codex-hook.sh')) {
+      console.log('Codex notify hook already configured!')
+    } else {
+      // Need to add our hook to existing notify array
+      // This is complex - for now, warn user to add manually
+      console.log('\n[!] Existing notify configuration found.')
+      console.log('    Please add the following to your notify array in ~/.codex/config.toml:')
+      console.log(`    "${installedHookPath}"`)
+      console.log('\nExample:')
+      console.log('  notify = ["existing-hook", "' + installedHookPath + '"]')
+    }
+  } else {
+    // Add notify configuration
+    const notifyConfig = `\n# CIN-Interface Codex integration\nnotify = ["${installedHookPath}"]\n`
+
+    // Append to config
+    writeFileSync(codexConfigPath, configContent + notifyConfig)
+    console.log(`Updated config: ${codexConfigPath}`)
+  }
+
+  // ==========================================================================
+  // Step 3: Ensure data directory exists
+  // ==========================================================================
+
+  const dataDir = join(homedir(), '.vibecraft', 'data')
+  if (!existsSync(dataDir)) {
+    mkdirSync(dataDir, { recursive: true })
+    console.log(`Created ${dataDir}`)
+  }
+
+  // ==========================================================================
+  // Step 4: Verify and report
+  // ==========================================================================
+
+  console.log('\n' + '='.repeat(50))
+  console.log('Codex setup complete!')
+  console.log('='.repeat(50))
+
+  console.log('\nIntegration details:')
+  console.log(`  - Hook script: ${installedHookPath}`)
+  console.log(`  - Config file: ${codexConfigPath}`)
+
+  // Check dependencies
+  let hasWarnings = false
+
+  if (!checkJq()) {
+    hasWarnings = true
+    console.log('\n[!] Warning: jq not found')
+    console.log('    Install: brew install jq (macOS) or apt install jq (Linux)')
+  }
+
+  // Check if Codex CLI is installed
+  try {
+    execSync('which codex', { stdio: 'ignore' })
+    console.log('\n✓ Codex CLI found')
+  } catch {
+    hasWarnings = true
+    console.log('\n[!] Warning: codex CLI not found in PATH')
+    console.log('    Make sure OpenAI Codex CLI is installed')
+  }
+
+  if (!hasWarnings) {
+    console.log('\nAll dependencies found!')
+  }
+
+  console.log('\nHow it works:')
+  console.log('  - Codex fires notify on each turn completion')
+  console.log('  - Hook script sends events to CIN-Interface server')
+  console.log('  - Server broadcasts to connected browsers in real-time')
+
+  console.log('\nNext steps:')
+  console.log('  1. Start CIN-Interface: npx cin-interface')
+  console.log('  2. Start a Codex session in any directory')
+  console.log('  3. Watch events appear in the web UI\n')
+
+  process.exit(0)
+}
+
 // Uninstall command
 if (args[0] === 'uninstall') {
   const { writeFileSync, rmSync } = await import('fs')
@@ -445,13 +590,20 @@ if (args[0] === 'uninstall') {
   }
 
   // ==========================================================================
-  // Step 3: Remove hook script (but keep data)
+  // Step 3: Remove hook scripts (but keep data)
   // ==========================================================================
 
   const hookScript = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook.sh')
   if (existsSync(hookScript)) {
     rmSync(hookScript)
     console.log(`Removed: ${hookScript}`)
+  }
+
+  // Also remove Codex hook
+  const codexHookScript = join(homedir(), '.vibecraft', 'hooks', 'codex-hook.sh')
+  if (existsSync(codexHookScript)) {
+    rmSync(codexHookScript)
+    console.log(`Removed: ${codexHookScript}`)
   }
 
   // Remove hooks directory if empty
@@ -467,6 +619,37 @@ if (args[0] === 'uninstall') {
   }
 
   // ==========================================================================
+  // Step 4: Remove Codex notify config
+  // ==========================================================================
+
+  const codexConfigPath = join(homedir(), '.codex', 'config.toml')
+  if (existsSync(codexConfigPath)) {
+    try {
+      let configContent = readFileSync(codexConfigPath, 'utf-8')
+      if (configContent.includes('codex-hook.sh')) {
+        // Backup before modifying
+        const codexBackupPath = `${codexConfigPath}.backup-${Date.now()}`
+        writeFileSync(codexBackupPath, configContent)
+        console.log(`Backed up Codex config: ${codexBackupPath}`)
+
+        // Remove the notify line containing our hook
+        const lines = configContent.split('\n')
+        const filteredLines = lines.filter(line => {
+          // Remove CIN-Interface comment and notify line with our hook
+          if (line.includes('# CIN-Interface Codex integration')) return false
+          if (line.includes('notify') && line.includes('codex-hook.sh')) return false
+          return true
+        })
+        configContent = filteredLines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n'
+        writeFileSync(codexConfigPath, configContent)
+        console.log(`Removed notify config from: ${codexConfigPath}`)
+      }
+    } catch (e) {
+      console.log(`  Warning: Could not modify Codex config: ${e.message}`)
+    }
+  }
+
+  // ==========================================================================
   // Done
   // ==========================================================================
 
@@ -478,7 +661,7 @@ if (args[0] === 'uninstall') {
   console.log('Your data is preserved in ~/.vibecraft/data/')
   console.log('\nTo remove all data:')
   console.log('  rm -rf ~/.vibecraft')
-  console.log('\nRestart Claude Code for changes to take effect.\n')
+  console.log('\nRestart Claude Code and Codex CLI for changes to take effect.\n')
 
   process.exit(0)
 }
@@ -624,6 +807,52 @@ if (args[0] === 'doctor') {
     } catch (e) {
       console.log(`  ✗ Failed to parse settings: ${e.message}`)
       issues.push('Claude settings file has invalid JSON')
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3b. Check Codex configuration (optional)
+  // -------------------------------------------------------------------------
+  console.log('\n[3b/6] Checking Codex CLI configuration (optional)...')
+
+  const codexConfigPath = join(homedir(), '.codex', 'config.toml')
+  const codexHookPath = join(homedir(), '.vibecraft', 'hooks', 'codex-hook.sh')
+
+  // Check if Codex CLI is installed
+  let codexInstalled = false
+  try {
+    execSync('which codex', { stdio: 'ignore' })
+    codexInstalled = true
+    console.log('  ✓ Codex CLI found')
+  } catch {
+    console.log('  - Codex CLI not installed (optional)')
+  }
+
+  if (codexInstalled) {
+    // Check Codex hook script
+    if (existsSync(codexHookPath)) {
+      console.log(`  ✓ Codex hook script installed`)
+    } else {
+      console.log('  ⚠ Codex hook not installed')
+      warnings.push('Codex hook not installed. Run: npx cin-interface setup-codex')
+    }
+
+    // Check Codex config
+    if (existsSync(codexConfigPath)) {
+      try {
+        const configContent = readFileSync(codexConfigPath, 'utf-8')
+        if (configContent.includes('codex-hook.sh')) {
+          console.log('  ✓ Codex notify configured')
+        } else {
+          console.log('  ⚠ Codex notify not configured')
+          warnings.push('Codex notify not configured. Run: npx cin-interface setup-codex')
+        }
+      } catch (e) {
+        console.log(`  ⚠ Could not read Codex config: ${e.message}`)
+      }
+    } else {
+      console.log('  ⚠ No Codex config file found')
+      warnings.push('Codex not configured. Run: npx cin-interface setup-codex')
     }
   }
 

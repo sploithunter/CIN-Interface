@@ -37,6 +37,11 @@ export declare class CodexSessionWatcher extends EventEmitter {
      * Stop watching
      */
     stop(): void;
+    /**
+     * Trigger immediate check for a specific thread
+     * Called when Codex notify hook fires for instant event processing
+     */
+    triggerCheckForThread(threadId: string): void;
     private static readonly MAX_SESSION_AGE_MS;
     /**
      * Scan for existing session files (only recent ones)

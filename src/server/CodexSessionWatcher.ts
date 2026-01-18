@@ -149,6 +149,34 @@ export class CodexSessionWatcher extends EventEmitter {
     this.log('Stopped watching Codex sessions');
   }
 
+  /**
+   * Trigger immediate check for a specific thread
+   * Called when Codex notify hook fires for instant event processing
+   */
+  triggerCheckForThread(threadId: string): void {
+    this.debugLog(`Notify received for thread: ${threadId}`);
+
+    // Find any tracked file with this thread ID
+    for (const tracked of this.trackedFiles.values()) {
+      if (tracked.threadId === threadId) {
+        try {
+          const stat = statSync(tracked.path);
+          if (stat.mtimeMs > tracked.lastModified) {
+            tracked.lastModified = stat.mtimeMs;
+          }
+          this.readNewContent(tracked, false);
+        } catch (e) {
+          this.debugLog(`Error checking ${tracked.path}: ${(e as Error).message}`);
+        }
+        return;
+      }
+    }
+
+    // Thread not found - might be a new session, trigger a scan
+    this.debugLog(`Thread ${threadId} not tracked, scanning for new sessions`);
+    this.scanForSessions();
+  }
+
   // Only track session files modified within the last 24 hours
   private static readonly MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000;
 
