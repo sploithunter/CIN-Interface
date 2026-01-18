@@ -275,8 +275,12 @@ function renderSessions() {
 function getSessionStatusText(session: ManagedSession, isExternal: boolean = false, isUnplaced: boolean = false): string {
   // Build type prefix for external/agent type
   const isCodex = session.agent === 'codex';
-  const agentTag = isCodex ? '<span class="session-agent-tag codex">codex</span> ' : '';
-  const typePrefix = isExternal && !isCodex ? '<span class="session-type-tag">ext</span> ' : '';
+  // Show agent tag for both Claude and Codex external sessions
+  const agentTag = isCodex
+    ? '<span class="session-agent-tag codex">codex</span> '
+    : (isExternal ? '<span class="session-agent-tag claude">claude</span> ' : '');
+  // Show EXT tag for all external sessions
+  const typePrefix = isExternal ? '<span class="session-type-tag">ext</span> ' : '';
   const unplacedSuffix = isUnplaced ? ' <span class="session-unplaced-tag">⊕</span>' : '';
 
   if (session.status === 'waiting') {

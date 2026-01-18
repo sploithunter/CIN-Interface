@@ -447,6 +447,11 @@ kbd {
   color: #34d399;
 }
 
+.session-agent-tag.claude {
+  background: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+}
+
 /* Codex session card styling */
 .session-card.codex {
   border-left: 3px solid #10b981;

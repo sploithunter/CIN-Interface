@@ -1078,23 +1078,34 @@ function checkWorkingTimeout(): void {
   }
 }
 
-/** How long without activity before marking Codex sessions offline */
-const CODEX_INACTIVE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+/** How long without file activity before marking Codex sessions offline */
+const CODEX_INACTIVE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Check Codex session health based on activity time
- * Mark sessions as offline if they haven't had activity recently
+ * Check Codex session health based on session file modification time.
+ * This is more accurate than lastActivity since the file is updated even
+ * when the session is idle but still running.
  */
 function checkCodexSessionHealth(): void {
-  const now = Date.now();
+  if (!codexWatcherInstance) return;
+
   let changed = false;
 
   for (const session of managedSessions.values()) {
-    // Only check Codex sessions that aren't already offline
-    if (session.agent === 'codex' && session.status !== 'offline') {
-      const inactiveTime = now - session.lastActivity;
-      if (inactiveTime >= CODEX_INACTIVE_THRESHOLD_MS) {
-        log(`Codex session "${session.name}" marked offline (inactive for ${Math.round(inactiveTime / 60000)} min)`);
+    // Only check EXTERNAL Codex sessions - never auto-offline internal sessions
+    // Internal sessions could have unsaved work or background processes
+    if (session.agent === 'codex' &&
+        session.type === 'external' &&
+        session.status !== 'offline' &&
+        session.codexThreadId) {
+      // Check if the session file was modified recently
+      const isActive = codexWatcherInstance.isSessionActive(
+        session.codexThreadId,
+        CODEX_INACTIVE_THRESHOLD_MS
+      );
+
+      if (!isActive) {
+        log(`Codex session "${session.name}" marked offline (file inactive for 5+ min)`);
         session.status = 'offline';
         session.currentTool = undefined;
         changed = true;
@@ -1120,7 +1131,13 @@ function cleanupStaleOfflineSessions(): void {
     if (session.status === 'offline') {
       const offlineTime = now - session.lastActivity;
 
-      // Codex sessions clean up faster (10 min) since they have no persistent process
+      // SAFETY: Only auto-cleanup EXTERNAL sessions
+      // Internal sessions could have background processes - never auto-delete them
+      if (session.type === 'internal') {
+        continue;
+      }
+
+      // External Codex sessions clean up faster (5 min) since they have no persistent process
       const threshold = session.agent === 'codex' ? CODEX_CLEANUP_MS : OFFLINE_CLEANUP_MS;
 
       if (offlineTime >= threshold) {
@@ -1461,6 +1478,9 @@ function findOrCreateExternalSession(claudeSessionId: string, eventCwd: string, 
 /** Map of Codex thread IDs to managed session IDs */
 const codexToManagedMap = new Map<string, string>();
 
+/** Reference to Codex watcher for session health checks */
+let codexWatcherInstance: CodexSessionWatcher | null = null;
+
 /**
  * Find existing session or auto-create a session for Codex threads.
  * Also updates session cwd/name if the event has better info.
@@ -1534,6 +1554,7 @@ function findOrCreateCodexSession(codexThreadId: string, eventCwd: string, name?
  */
 function initCodexWatcher(): void {
   const codexWatcher = getCodexWatcher({ debug: DEBUG });
+  codexWatcherInstance = codexWatcher;
 
   codexWatcher.on('event', (event: VibecraftEvent) => {
     // Find or create session for this event
