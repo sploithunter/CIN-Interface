@@ -1568,48 +1568,15 @@ function initCodexWatcher(): void {
   codexWatcher.on('event', (event: VibecraftEvent) => {
     // Store the original Codex thread ID for recovery/matching
     const codexThreadId = event.sessionId;
-
-    // Find or create session for this event
-    const session = findOrCreateCodexSession(
-      codexThreadId,
-      event.cwd,
-    );
-
-    // IMPORTANT: Update event's sessionId to match the managed session's ID
-    // so the frontend can properly filter events by session
-    event.sessionId = session.id;
-
-    // Store codexThreadId for future recovery if session ID changes
     (event as any).codexThreadId = codexThreadId;
 
-    // Update session state based on event
-    if (event.type === 'stop') {
-      session.status = 'idle';
-      session.currentTool = undefined;
-    } else if (event.type === 'pre_tool_use') {
-      session.status = 'working';
-      session.currentTool = (event as PreToolUseEvent).tool;
-    } else if (event.type === 'post_tool_use') {
-      session.currentTool = (event as PostToolUseEvent).tool;
-    }
-    session.lastActivity = Date.now();
-
-    // Add to events and broadcast
-    events.push(event);
-    if (events.length > MAX_EVENTS) {
-      events.shift();
-    }
-
-    // Persist Codex events to events.jsonl (like hook events do)
+    // Just write to file - the file watcher will handle processing uniformly
+    // This keeps the same code path for both Claude and Codex events
     try {
       appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
     } catch (err) {
       debug(`Failed to persist Codex event: ${err}`);
     }
-
-    broadcast({ type: 'event', payload: event });
-    broadcastSessions();
-    saveSessions();
   });
 
   codexWatcher.on('session:new', (info: { threadId: string; cwd: string; name: string }) => {
@@ -1714,9 +1681,20 @@ function addEvent(event: VibecraftEvent): void {
   }
 
   // Find or auto-create session for this event
-  // Internal sessions are found by Claude session ID mapping
-  // External sessions are auto-created when we see an unknown Claude session
-  const managedSession = findOrCreateExternalSession(event.sessionId, event.cwd, terminalInfo);
+  // Codex events have codexThreadId, Claude events use sessionId
+  const codexThreadId = (event as any).codexThreadId;
+  let managedSession: ManagedSession;
+
+  if (codexThreadId) {
+    // Codex event - use codexThreadId for session lookup
+    managedSession = findOrCreateCodexSession(codexThreadId, event.cwd);
+    // Update event's sessionId to match managed session for frontend filtering
+    event.sessionId = managedSession.id;
+  } else {
+    // Claude event - use claudeSessionId for session lookup
+    managedSession = findOrCreateExternalSession(event.sessionId, event.cwd, terminalInfo);
+  }
+
   if (managedSession) {
     const prevStatus = managedSession.status;
     managedSession.lastActivity = Date.now();
@@ -1807,12 +1785,6 @@ function watchEventsFile(): void {
         for (const line of newLines) {
           try {
             const event = JSON.parse(line) as VibecraftEvent;
-            // Skip Codex events - they were already processed by CodexWatcher
-            // and written to the file. Processing them again would create duplicates.
-            if ((event as any).agent === 'codex' || (event as any).codexThreadId) {
-              debug(`Skipping Codex event from file: ${event.type}`);
-              continue;
-            }
             addEvent(event);
             debug(`New event from file: ${event.type}`);
           } catch {
