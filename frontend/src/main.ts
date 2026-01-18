@@ -19,7 +19,7 @@ import {
   formatBashOutput,
   getSessionStatusText,
 } from './lib/utils';
-import type { ManagedSession, VibecraftEvent, WSMessage } from './types';
+import type { ManagedSession, VibecraftEvent, WSMessage, PermissionPrompt } from './types';
 
 // State
 let sessions: ManagedSession[] = [];
@@ -29,6 +29,7 @@ let _isConnected = false;
 let tokenCount = 0;
 let sceneManager: SceneManager | null = null;
 let pendingZonePosition: { q: number; r: number } | null = null;
+let pendingPermissions: Map<string, PermissionPrompt> = new Map();
 
 // DOM Elements
 const statusDot = document.getElementById('status-dot')!;
@@ -82,6 +83,13 @@ const aboutClose = document.getElementById('about-close')!;
 const hexContextMenu = document.getElementById('hex-context-menu')!;
 let hexMenuPosition: { q: number; r: number } | null = null;
 let hexMenuShowTime = 0;
+
+// Permission banner
+const permissionBanner = document.getElementById('permission-banner')!;
+const permissionSessionName = document.getElementById('permission-session-name')!;
+const permissionTool = document.getElementById('permission-tool')!;
+const permissionContext = document.getElementById('permission-context')!;
+const permissionOptions = document.getElementById('permission-options')!;
 
 // Initialize
 async function init() {
@@ -177,6 +185,20 @@ function handleMessage(message: WSMessage) {
       tokenCount = tokens.cumulative;
       tokenCounter.textContent = `${formatTokens(tokenCount)} tok`;
       break;
+
+    case 'permission_prompt': {
+      const permission = message.payload as PermissionPrompt;
+      pendingPermissions.set(permission.sessionId, permission);
+      updatePermissionBanner();
+      break;
+    }
+
+    case 'permission_resolved': {
+      const { sessionId } = message.payload as { sessionId: string };
+      pendingPermissions.delete(sessionId);
+      updatePermissionBanner();
+      break;
+    }
   }
 }
 
@@ -295,6 +317,7 @@ function selectSession(sessionId: string | null) {
   sceneManager?.selectZone(sessionId === 'all' ? null : sessionId);
 
   updatePromptTarget();
+  updatePermissionBanner();
   renderAllEvents();
 }
 
@@ -341,6 +364,68 @@ function filterEvents(): VibecraftEvent[] {
   if (!session) return [];
 
   return events.filter(e => eventBelongsToSession(e, session, sessions));
+}
+
+function updatePermissionBanner() {
+  // Find permission for currently selected session, or any pending permission
+  let permission: PermissionPrompt | undefined;
+
+  if (selectedSessionId && selectedSessionId !== 'all') {
+    permission = pendingPermissions.get(selectedSessionId);
+  }
+
+  // If no permission for selected session, show first pending one
+  if (!permission && pendingPermissions.size > 0) {
+    permission = pendingPermissions.values().next().value;
+  }
+
+  if (!permission) {
+    permissionBanner.classList.add('hidden');
+    return;
+  }
+
+  // Find session name
+  const session = sessions.find(s => s.id === permission!.sessionId);
+  const sessionName = session?.name || 'Unknown session';
+
+  permissionSessionName.textContent = sessionName;
+  permissionTool.textContent = permission.tool || 'Unknown tool';
+
+  // Format context (truncate if too long)
+  const contextLines = permission.context.split('\n').slice(-10);
+  permissionContext.textContent = contextLines.join('\n');
+
+  // Render options as buttons
+  permissionOptions.innerHTML = permission.options.map(opt =>
+    `<button class="permission-option-btn" data-session="${permission!.sessionId}" data-option="${opt.number}">
+      <span class="permission-option-key">${opt.number}</span>
+      <span class="permission-option-label">${escapeHtml(opt.label)}</span>
+    </button>`
+  ).join('');
+
+  // Add click handlers
+  permissionOptions.querySelectorAll('.permission-option-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sessionId = (btn as HTMLElement).dataset.session!;
+      const optionNumber = (btn as HTMLElement).dataset.option!;
+      sendPermissionResponse(sessionId, optionNumber);
+    });
+  });
+
+  permissionBanner.classList.remove('hidden');
+}
+
+function sendPermissionResponse(sessionId: string, optionNumber: string) {
+  ws.send({
+    type: 'permission_response',
+    payload: { sessionId, response: optionNumber }
+  });
+
+  // Optimistically hide the banner
+  pendingPermissions.delete(sessionId);
+  updatePermissionBanner();
+
+  showToast(`Sent response: option ${optionNumber}`, 'success');
 }
 
 function renderEvent(event: VibecraftEvent, autoScroll = true) {
@@ -679,17 +764,37 @@ function setupEventHandlers() {
       }
     }
 
-    // Number keys 0-9 for session selection
-    if (e.key >= '0' && e.key <= '9' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // Number keys - handle permission response if banner is visible
+    if (e.key >= '1' && e.key <= '9' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const target = document.activeElement;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
 
+      // If permission banner is visible, respond to permission
+      if (!permissionBanner.classList.contains('hidden')) {
+        const permission = pendingPermissions.values().next().value;
+        if (permission) {
+          const optionNumber = e.key;
+          const option = permission.options.find((opt: { number: string }) => opt.number === optionNumber);
+          if (option) {
+            e.preventDefault();
+            sendPermissionResponse(permission.sessionId, optionNumber);
+            return;
+          }
+        }
+      }
+
+      // Otherwise select session
       const num = parseInt(e.key);
-      if (num === 0) {
-        selectSession('all');
-      } else if (num <= sessions.length) {
+      if (num <= sessions.length) {
         selectSession(sessions[num - 1].id);
       }
+    }
+
+    // 0 key always selects "all sessions"
+    if (e.key === '0' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const target = document.activeElement;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      selectSession('all');
     }
 
     // Escape to close modals

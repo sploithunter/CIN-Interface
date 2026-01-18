@@ -49,7 +49,7 @@
 - [x] Auto-cleanup stale sessions (detect and remove sessions killed externally)
 
 ### Medium Priority
-- [ ] Permission prompt handling in web UI
+- [x] Permission prompt handling in web UI
 - [ ] Drag and drop images into prompt input (research how Claude CLI handles image paths)
 - [ ] File explorer for current repo (view/navigate edited files)
 

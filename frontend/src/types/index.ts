@@ -102,6 +102,29 @@ export interface TokensMessage extends WSMessage {
   };
 }
 
+// Permission types
+export interface PermissionOption {
+  number: string;
+  label: string;
+}
+
+export interface PermissionPrompt {
+  sessionId: string;
+  tool: string;
+  context: string;
+  options: PermissionOption[];
+}
+
+export interface PermissionPromptMessage extends WSMessage {
+  type: 'permission_prompt';
+  payload: PermissionPrompt;
+}
+
+export interface PermissionResolvedMessage extends WSMessage {
+  type: 'permission_resolved';
+  payload: { sessionId: string };
+}
+
 // API response types
 export interface HealthResponse {
   ok: boolean;
