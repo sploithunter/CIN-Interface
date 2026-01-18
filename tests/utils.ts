@@ -163,14 +163,15 @@ export function sleep(ms: number): Promise<void> {
 
 /**
  * Create a test event with defaults
+ * Uses __test__ prefix to identify test-created sessions for cleanup
  */
 export function createTestEvent(overrides: Partial<TestEvent> = {}): TestEvent {
   return {
-    id: `test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: `__test__event-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     type: 'pre_tool_use',
     timestamp: Date.now(),
-    sessionId: 'test-session',
-    cwd: '/tmp/test',
+    sessionId: '__test__default-session',
+    cwd: '/tmp/__test__default',
     tool: 'Bash',
     toolInput: { command: 'echo test' },
     ...overrides

@@ -2,12 +2,32 @@
  * Tests for WebSocket connection and messaging
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import WebSocket from 'ws';
-import { waitForOpen, waitForMessage, waitForMessageType, waitForEventById, collectMessages, post, createTestEvent, createTestWebSocket, del } from '../../utils';
+import { waitForOpen, waitForMessage, waitForMessageType, waitForEventById, collectMessages, get, post, createTestEvent, createTestWebSocket, del } from '../../utils';
 
 const WS_URL = 'ws://localhost:4003';
 const SERVER_PORT = 4003;
+
+/**
+ * Clean up test sessions created by createTestEvent defaults
+ */
+async function cleanupTestSessions(): Promise<void> {
+  const sessionsRes = await get('/sessions', SERVER_PORT);
+  const testSessions = sessionsRes.body.sessions.filter(
+    (s: any) =>
+      s.claudeSessionId?.startsWith('__test__') ||
+      s.cwd?.includes('__test__')
+  );
+
+  for (const session of testSessions) {
+    try {
+      await del(`/sessions/${session.id}`, SERVER_PORT);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
 
 describe('WebSocket Connection', () => {
   const openSockets: WebSocket[] = [];
@@ -132,6 +152,10 @@ describe('WebSocket Broadcasting', () => {
       }
     }
     createdSessionIds.length = 0;
+  });
+
+  afterAll(async () => {
+    await cleanupTestSessions();
   });
 
   it('broadcasts events to connected clients', async () => {
