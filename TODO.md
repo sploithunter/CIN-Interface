@@ -54,10 +54,14 @@
 - [ ] File explorer for current repo (view/navigate edited files)
 
 ### Agent Integrations
-- [ ] OpenAI Codex CLI integration (first non-Claude agent)
-  - [ ] Research Codex CLI hook system / event format
-  - [ ] Create adapter to translate Codex events to CIN-Interface format
-  - [ ] Add agent type indicator in UI (Claude vs Codex)
+- [ ] OpenAI Codex CLI integration (first non-Claude agent) - See [CODEX_INTEGRATION.md](docs/CODEX_INTEGRATION.md)
+  - [x] Research Codex CLI hook system / event format
+  - [x] Create integration spec document
+  - [ ] Phase 1: CodexSessionWatcher (watch ~/.codex/sessions/ JSONL files)
+  - [ ] Phase 1: Event mapper (Codex events → CIN-Interface format)
+  - [ ] Phase 1: Add agent type field to sessions and UI
+  - [ ] Phase 2: Codex notify hook for real-time events
+  - [ ] Phase 3: SDK integration for internal Codex sessions
 
 ### Low Priority / Future
 - [ ] Text labels on hex grid (partially implemented)
