@@ -1079,7 +1079,7 @@ function checkWorkingTimeout(): void {
 }
 
 /** How long without file activity before marking Codex sessions offline */
-const CODEX_INACTIVE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const CODEX_INACTIVE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes (Codex may be idle but still open)
 
 /**
  * Check Codex session health based on session file modification time.
@@ -1119,8 +1119,8 @@ function checkCodexSessionHealth(): void {
   }
 }
 
-/** Cleanup time for Codex sessions (shorter since they have no persistent process) */
-const CODEX_CLEANUP_MS = 5 * 60 * 1000; // 5 minutes
+/** Cleanup time for Codex sessions - same as Claude since user may return to idle sessions */
+const CODEX_CLEANUP_MS = 60 * 60 * 1000; // 1 hour (same as Claude)
 
 /** Auto-cleanup sessions that have been offline for too long */
 function cleanupStaleOfflineSessions(): void {
