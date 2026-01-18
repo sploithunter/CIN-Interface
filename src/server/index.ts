@@ -1127,30 +1127,39 @@ function cleanupStaleOfflineSessions(): void {
   const now = Date.now();
   const toDelete: string[] = [];
 
-  for (const session of managedSessions.values()) {
-    if (session.status === 'offline') {
-      const offlineTime = now - session.lastActivity;
+  // First, get list of active tmux sessions for safety check
+  exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
+    const activeTmuxSessions = error ? new Set<string>() : new Set(stdout.trim().split('\n').filter(Boolean));
 
-      // SAFETY: Only auto-cleanup EXTERNAL sessions
-      // Internal sessions could have background processes - never auto-delete them
-      if (session.type === 'internal') {
-        continue;
-      }
+    for (const session of managedSessions.values()) {
+      if (session.status === 'offline') {
+        const offlineTime = now - session.lastActivity;
 
-      // External Codex sessions clean up faster (5 min) since they have no persistent process
-      const threshold = session.agent === 'codex' ? CODEX_CLEANUP_MS : OFFLINE_CLEANUP_MS;
+        // SAFETY: For internal sessions, only cleanup if tmux session is truly gone
+        // This protects against deleting sessions with active processes
+        if (session.type === 'internal' && session.tmuxSession) {
+          if (activeTmuxSessions.has(session.tmuxSession)) {
+            // Tmux session still exists - don't cleanup, something is wrong with our state
+            continue;
+          }
+          // Tmux session is gone (e.g., after reboot) - safe to cleanup after threshold
+        }
 
-      if (offlineTime >= threshold) {
-        log(`Auto-cleaning stale ${session.agent || 'claude'} session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
-        toDelete.push(session.id);
+        // External Codex sessions clean up faster (5 min) since they have no persistent process
+        const threshold = session.agent === 'codex' ? CODEX_CLEANUP_MS : OFFLINE_CLEANUP_MS;
+
+        if (offlineTime >= threshold) {
+          log(`Auto-cleaning stale ${session.agent || 'claude'} session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
+          toDelete.push(session.id);
+        }
       }
     }
-  }
 
-  // Delete sessions (async, but we don't need to wait)
-  for (const id of toDelete) {
-    deleteSession(id);
-  }
+    // Delete sessions
+    for (const id of toDelete) {
+      deleteSession(id);
+    }
+  });
 }
 
 interface SavedSessionsData {
