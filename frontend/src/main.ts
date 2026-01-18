@@ -424,6 +424,8 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
   const hasExpandableToolDetails = event.tool && ['Edit', 'Write', 'Read'].includes(event.tool) && event.toolInput;
   // Check if this is a Bash event with output that should be expandable
   const hasBashOutput = event.tool === 'Bash' && event.toolResponse && hasLongBashOutput(event);
+  // Check if this is a Task (subagent) event
+  const isTaskEvent = event.tool === 'Task' && event.toolInput;
   // Check if this event has a long response that should be collapsible
   const hasLongContent = hasLongResponse(event);
 
@@ -475,6 +477,38 @@ function renderEvent(event: VibecraftEvent, autoScroll = true) {
         previewEl?.classList.remove('hidden');
       }
     });
+  } else if (isTaskEvent) {
+    // Task (subagent) event - show description with expandable prompt
+    const input = event.toolInput as Record<string, unknown>;
+    const description = typeof input.description === 'string' ? input.description : 'Agent task';
+    const subagentType = typeof input.subagent_type === 'string' ? input.subagent_type : '';
+    const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+    const typeTag = subagentType ? `<span class="task-type-tag">${escapeHtml(subagentType)}</span>` : '';
+
+    el.innerHTML = `
+      <div class="feed-item-header">
+        <span class="feed-item-tool">${toolIcon}${escapeHtml(toolName)}</span>
+        <span class="feed-item-time">${formatTime(event.timestamp)}${duration}</span>
+      </div>
+      <div class="feed-item-task-summary">
+        ${typeTag}
+        <span class="task-description">${escapeHtml(description)}</span>
+      </div>
+      ${prompt ? `
+        <div class="feed-item-toggle task-toggle">Show prompt</div>
+        <div class="feed-item-expandable">
+          <div class="feed-item-content task-prompt">${escapeHtml(prompt)}</div>
+        </div>
+      ` : ''}
+    `;
+    // Add click handler for toggle if prompt exists
+    if (prompt) {
+      const toggle = el.querySelector('.feed-item-toggle');
+      toggle?.addEventListener('click', () => {
+        toggle.classList.toggle('expanded');
+        toggle.textContent = toggle.classList.contains('expanded') ? 'Hide prompt' : 'Show prompt';
+      });
+    }
   } else if (hasLongContent) {
     // Long response - show truncated with expand option
     const truncatedContent = formatEventContent(event, false);

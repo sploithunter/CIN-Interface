@@ -730,6 +730,41 @@ kbd {
   margin-top: 4px;
 }
 
+/* Task (subagent) event styles */
+.feed-item-task-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.task-type-tag {
+  background: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.task-description {
+  color: var(--text-secondary);
+}
+
+.task-toggle {
+  margin-top: 4px;
+}
+
+.task-prompt {
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 #feed-scroll-bottom {
   position: absolute;
   bottom: 12px;
