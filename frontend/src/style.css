@@ -663,6 +663,8 @@ kbd {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
+  max-height: none;
+  overflow: visible;
 }
 
 #feed-scroll-bottom {

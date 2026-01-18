@@ -1606,7 +1606,13 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 function serveStaticFile(req: IncomingMessage, res: ServerResponse): void {
-  const distDir = resolve(dirname(new URL(import.meta.url).pathname), '../..');
+  // In dev mode (tsx watch), we're in src/server, so go up 2 levels then into dist
+  // In production (dist/server), go up 1 level to dist
+  const serverDir = dirname(new URL(import.meta.url).pathname);
+  const isDevMode = serverDir.includes('/src/');
+  const distDir = isDevMode
+    ? resolve(serverDir, '../../dist')
+    : resolve(serverDir, '..');
 
   let urlPath = req.url?.split('?')[0] ?? '/';
   if (urlPath === '/') urlPath = '/index.html';

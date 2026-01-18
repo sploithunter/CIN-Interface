@@ -44,6 +44,7 @@
 - [x] Replace Vibecraft references with CIN-Interface throughout codebase (user-facing strings updated; ~/.vibecraft paths kept for backward compatibility)
 - [x] Add expand/collapse for large responses in activity feed
 - [x] Add option to minimize 3D map and maximize chat/activity interface
+- [ ] Add expand/collapse for Bash/script output in activity feed
 
 ### Medium Priority
 - [ ] Permission prompt handling in web UI
@@ -62,7 +63,7 @@
 
 ---
 
-## Recent Changes (2026-01-17)
+## Recent Changes (2026-01-18)
 
 ### Fixed
 - Session creation now uses two-step tmux approach (create session, then send claude command)
@@ -85,3 +86,4 @@
 - Expand/collapse for long responses in activity feed (> 500 chars shows preview + "Show full response")
 - Map minimize/maximize toggle button and M keyboard shortcut (preference saved in localStorage)
 - Fixed expand/collapse to show full content height (removed max-height constraint)
+- Fixed dev mode static file path resolution (tsx watch now correctly serves from dist/)
