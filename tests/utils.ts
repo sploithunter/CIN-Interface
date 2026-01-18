@@ -56,6 +56,9 @@ export function waitForMessage(ws: WebSocket, timeout = 5000): Promise<any> {
 
 /**
  * Drain N messages from WebSocket
+ * Note: This uses sequential waitForMessage calls which may miss messages
+ * that arrive faster than the loop can process. For initial connection
+ * messages, use collectMessages instead.
  */
 export async function drainMessages(ws: WebSocket, count: number): Promise<any[]> {
   const messages: any[] = [];
@@ -67,6 +70,30 @@ export async function drainMessages(ws: WebSocket, count: number): Promise<any[]
     }
   }
   return messages;
+}
+
+/**
+ * Collect messages from WebSocket with a timeout
+ * Sets up listener before waiting, to capture all rapid-fire messages
+ */
+export function collectMessages(ws: WebSocket, timeout = 1000): Promise<any[]> {
+  return new Promise((resolve) => {
+    const messages: any[] = [];
+    const handler = (data: WebSocket.Data) => {
+      try {
+        messages.push(JSON.parse(data.toString()));
+      } catch {
+        // Ignore parse errors
+      }
+    };
+
+    ws.on('message', handler);
+
+    setTimeout(() => {
+      ws.removeListener('message', handler);
+      resolve(messages);
+    }, timeout);
+  });
 }
 
 /**

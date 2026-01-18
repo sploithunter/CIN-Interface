@@ -11,7 +11,7 @@ import WebSocket from 'ws';
 import { appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { waitForOpen, waitForEventById, drainMessages, get, del, createTestWebSocket } from '../../utils';
+import { waitForOpen, waitForEventById, waitForMessageType, drainMessages, get, del, createTestWebSocket } from '../../utils';
 
 const WS_URL = 'ws://localhost:4003';
 const SERVER_PORT = 4003;
@@ -246,17 +246,20 @@ describe('Event Deduplication', () => {
     appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
     appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
 
-    // Wait for the first event
-    const msg1 = await waitForMessageType(ws, 'event', 2000);
+    // Wait for the first event by ID
+    const msg1 = await waitForEventById(ws, eventId, 2000);
     expect(msg1.payload.id).toBe(eventId);
 
-    // Second message should timeout or be a different event
+    // Second identical event should not be broadcast (timeout expected)
+    // We use a short timeout since duplicates should be filtered immediately
+    let gotDuplicate = false;
     try {
-      const msg2 = await waitForMessageType(ws, 'event', 1000);
-      // If we got a second event, it shouldn't be the same event
-      expect(msg2.payload.id).not.toBe(eventId);
+      // Listen for any event with same ID - should timeout
+      const msg2 = await waitForEventById(ws, eventId, 500);
+      gotDuplicate = true;
     } catch {
-      // Timeout is expected - no duplicate
+      // Timeout is expected - no duplicate broadcast
     }
+    expect(gotDuplicate).toBe(false);
   });
 });

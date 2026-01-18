@@ -4,7 +4,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import WebSocket from 'ws';
-import { waitForOpen, waitForMessage, waitForMessageType, waitForEventById, drainMessages, post, createTestEvent, createTestWebSocket, del } from '../../utils';
+import { waitForOpen, waitForMessage, waitForMessageType, waitForEventById, collectMessages, post, createTestEvent, createTestWebSocket, del } from '../../utils';
 
 const WS_URL = 'ws://localhost:4003';
 const SERVER_PORT = 4003;
@@ -34,21 +34,37 @@ describe('WebSocket Connection', () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
 
-    await waitForOpen(ws);
-    const message = await waitForMessage(ws);
+    // Set up listener before waiting for open to capture all messages
+    const messages: any[] = [];
+    ws.on('message', (data) => {
+      try {
+        messages.push(JSON.parse(data.toString()));
+      } catch { }
+    });
 
-    expect(message.type).toBe('connected');
-    // Server sends sessionId of the most recent event
-    expect(message.payload).toHaveProperty('sessionId');
+    await waitForOpen(ws);
+    // Wait for all initial messages to arrive
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    const connectedMsg = messages.find(m => m.type === 'connected');
+    expect(connectedMsg).toBeDefined();
+    expect(connectedMsg.payload).toHaveProperty('sessionId');
   });
 
   it('sends sessions list in initial messages', async () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
 
+    // Set up listener before waiting for open to capture all messages
+    const messages: any[] = [];
+    ws.on('message', (data) => {
+      try {
+        messages.push(JSON.parse(data.toString()));
+      } catch { }
+    });
+
     await waitForOpen(ws);
-    // Server sends: connected, sessions, text_tiles, history
-    const messages = await drainMessages(ws, 4);
+    await new Promise(resolve => setTimeout(resolve, 200));
 
     const sessionsMsg = messages.find(m => m.type === 'sessions');
     expect(sessionsMsg).toBeDefined();
@@ -59,9 +75,16 @@ describe('WebSocket Connection', () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
 
+    // Set up listener before waiting for open to capture all messages
+    const messages: any[] = [];
+    ws.on('message', (data) => {
+      try {
+        messages.push(JSON.parse(data.toString()));
+      } catch { }
+    });
+
     await waitForOpen(ws);
-    // Server sends: connected, sessions, text_tiles, history
-    const messages = await drainMessages(ws, 4);
+    await new Promise(resolve => setTimeout(resolve, 200));
 
     const tilesMsg = messages.find(m => m.type === 'text_tiles');
     expect(tilesMsg).toBeDefined();
@@ -71,9 +94,16 @@ describe('WebSocket Connection', () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
 
+    // Set up listener before waiting for open to capture all messages
+    const messages: any[] = [];
+    ws.on('message', (data) => {
+      try {
+        messages.push(JSON.parse(data.toString()));
+      } catch { }
+    });
+
     await waitForOpen(ws);
-    // Server sends: connected, sessions, text_tiles, history
-    const messages = await drainMessages(ws, 4);
+    await new Promise(resolve => setTimeout(resolve, 200));
 
     const historyMsg = messages.find(m => m.type === 'history');
     expect(historyMsg).toBeDefined();
@@ -108,18 +138,33 @@ describe('WebSocket Broadcasting', () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
 
-    await waitForOpen(ws);
-    await drainMessages(ws, 4); // connected, sessions, tiles, history
-
-    // Post event via HTTP
-    const event = createTestEvent({
-      id: `broadcast-test-${Date.now()}`
+    // Set up message collector before opening
+    const messages: any[] = [];
+    ws.on('message', (data) => {
+      try {
+        messages.push(JSON.parse(data.toString()));
+      } catch { }
     });
+
+    await waitForOpen(ws);
+    // Wait for initial messages to arrive
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Clear collected initial messages
+    messages.length = 0;
+
+    // Post event via HTTP with unique ID
+    const eventId = `broadcast-test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const event = createTestEvent({ id: eventId });
     await post('/event', event, SERVER_PORT);
 
-    // Should receive the event via WebSocket (may receive other messages first)
-    const msg = await waitForMessageType(ws, 'event', 3000);
-    expect(msg.payload.id).toBe(event.id);
+    // Wait for the event to be broadcast
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Find our event
+    const eventMsg = messages.find(m => m.type === 'event' && m.payload?.id === eventId);
+    expect(eventMsg).toBeDefined();
+    expect(eventMsg.payload.id).toBe(eventId);
   });
 
   it('broadcasts to multiple clients', async () => {
@@ -127,31 +172,63 @@ describe('WebSocket Broadcasting', () => {
     const ws2 = createTestWebSocket(WS_URL);
     openSockets.push(ws1, ws2);
 
-    await Promise.all([waitForOpen(ws1), waitForOpen(ws2)]);
-    await Promise.all([drainMessages(ws1, 4), drainMessages(ws2, 4)]);
-
-    // Post event
-    const event = createTestEvent({
-      id: `multi-broadcast-${Date.now()}`
+    // Set up message collectors before opening
+    const messages1: any[] = [];
+    const messages2: any[] = [];
+    ws1.on('message', (data) => {
+      try {
+        messages1.push(JSON.parse(data.toString()));
+      } catch { }
     });
+    ws2.on('message', (data) => {
+      try {
+        messages2.push(JSON.parse(data.toString()));
+      } catch { }
+    });
+
+    await Promise.all([waitForOpen(ws1), waitForOpen(ws2)]);
+    // Wait for initial messages
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Clear initial messages
+    messages1.length = 0;
+    messages2.length = 0;
+
+    // Post event with unique ID
+    const eventId = `multi-broadcast-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const event = createTestEvent({ id: eventId });
     await post('/event', event, SERVER_PORT);
 
-    // Both clients should receive event (may receive other messages first)
-    const [msg1, msg2] = await Promise.all([
-      waitForMessageType(ws1, 'event', 3000),
-      waitForMessageType(ws2, 'event', 3000)
-    ]);
+    // Wait for broadcasts
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-    expect(msg1.payload.id).toBe(event.id);
-    expect(msg2.payload.id).toBe(event.id);
+    // Both clients should have received the event
+    const msg1 = messages1.find(m => m.type === 'event' && m.payload?.id === eventId);
+    const msg2 = messages2.find(m => m.type === 'event' && m.payload?.id === eventId);
+
+    expect(msg1).toBeDefined();
+    expect(msg2).toBeDefined();
+    expect(msg1.payload.id).toBe(eventId);
+    expect(msg2.payload.id).toBe(eventId);
   });
 
   it('broadcasts session updates', async () => {
     const ws = createTestWebSocket(WS_URL);
     openSockets.push(ws);
 
+    // Set up message collector before opening
+    const messages: any[] = [];
+    ws.on('message', (data) => {
+      try {
+        messages.push(JSON.parse(data.toString()));
+      } catch { }
+    });
+
     await waitForOpen(ws);
-    await drainMessages(ws, 4);
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Clear initial messages
+    messages.length = 0;
 
     // Create a session (which triggers sessions broadcast)
     const res = await post('/sessions', { cwd: '/tmp', name: 'WS Broadcast Test' }, SERVER_PORT);
@@ -159,8 +236,11 @@ describe('WebSocket Broadcasting', () => {
       createdSessionIds.push(res.body.session.id);
     }
 
-    const msg = await waitForMessage(ws, 3000);
-    expect(msg.type).toBe('sessions');
+    // Wait for broadcast
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const sessionsMsg = messages.find(m => m.type === 'sessions');
+    expect(sessionsMsg).toBeDefined();
   });
 });
 
@@ -181,12 +261,13 @@ describe('WebSocket History', () => {
     openSockets.push(ws);
 
     await waitForOpen(ws);
-    await drainMessages(ws, 4);
+    // Use collectMessages to gather initial messages
+    await collectMessages(ws, 500);
 
     // Request history
     ws.send(JSON.stringify({ type: 'get_history', payload: { limit: 50 } }));
 
-    const msg = await waitForMessage(ws, 3000);
+    const msg = await waitForMessageType(ws, 'history', 3000);
     expect(msg.type).toBe('history');
     expect(Array.isArray(msg.payload)).toBe(true);
   });
@@ -196,11 +277,13 @@ describe('WebSocket History', () => {
     openSockets.push(ws);
 
     await waitForOpen(ws);
-    await drainMessages(ws, 4);
+    await collectMessages(ws, 500);
 
     ws.send(JSON.stringify({ type: 'get_history', payload: { limit: 10 } }));
 
-    const msg = await waitForMessage(ws, 3000);
+    // Wait specifically for a 'history' message type
+    const msg = await waitForMessageType(ws, 'history', 3000);
+    expect(Array.isArray(msg.payload)).toBe(true);
     expect(msg.payload.length).toBeLessThanOrEqual(10);
   });
 
@@ -209,7 +292,7 @@ describe('WebSocket History', () => {
     openSockets.push(ws);
 
     await waitForOpen(ws);
-    await drainMessages(ws, 4);
+    await collectMessages(ws, 300);
 
     // Send ping (server doesn't respond, but shouldn't error)
     ws.send(JSON.stringify({ type: 'ping' }));
@@ -237,7 +320,7 @@ describe('WebSocket Subscribe', () => {
     openSockets.push(ws);
 
     await waitForOpen(ws);
-    await drainMessages(ws, 4);
+    await collectMessages(ws, 300);
 
     ws.send(JSON.stringify({ type: 'subscribe' }));
 
