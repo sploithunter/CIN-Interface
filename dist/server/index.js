@@ -1522,6 +1522,12 @@ function watchEventsFile() {
                 for (const line of newLines) {
                     try {
                         const event = JSON.parse(line);
+                        // Skip Codex events - they were already processed by CodexWatcher
+                        // and written to the file. Processing them again would create duplicates.
+                        if (event.agent === 'codex' || event.codexThreadId) {
+                            debug(`Skipping Codex event from file: ${event.type}`);
+                            continue;
+                        }
                         addEvent(event);
                         debug(`New event from file: ${event.type}`);
                     }

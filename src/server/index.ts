@@ -1807,6 +1807,12 @@ function watchEventsFile(): void {
         for (const line of newLines) {
           try {
             const event = JSON.parse(line) as VibecraftEvent;
+            // Skip Codex events - they were already processed by CodexWatcher
+            // and written to the file. Processing them again would create duplicates.
+            if ((event as any).agent === 'codex' || (event as any).codexThreadId) {
+              debug(`Skipping Codex event from file: ${event.type}`);
+              continue;
+            }
             addEvent(event);
             debug(`New event from file: ${event.type}`);
           } catch {
