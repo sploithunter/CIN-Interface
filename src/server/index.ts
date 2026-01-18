@@ -1566,15 +1566,21 @@ function initCodexWatcher(): void {
   codexWatcherInstance = codexWatcher;
 
   codexWatcher.on('event', (event: VibecraftEvent) => {
+    // Store the original Codex thread ID for recovery/matching
+    const codexThreadId = event.sessionId;
+
     // Find or create session for this event
     const session = findOrCreateCodexSession(
-      event.sessionId, // This is the Codex thread ID
+      codexThreadId,
       event.cwd,
     );
 
     // IMPORTANT: Update event's sessionId to match the managed session's ID
     // so the frontend can properly filter events by session
     event.sessionId = session.id;
+
+    // Store codexThreadId for future recovery if session ID changes
+    (event as any).codexThreadId = codexThreadId;
 
     // Update session state based on event
     if (event.type === 'stop') {
@@ -1592,6 +1598,13 @@ function initCodexWatcher(): void {
     events.push(event);
     if (events.length > MAX_EVENTS) {
       events.shift();
+    }
+
+    // Persist Codex events to events.jsonl (like hook events do)
+    try {
+      appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
+    } catch (err) {
+      debug(`Failed to persist Codex event: ${err}`);
     }
 
     broadcast({ type: 'event', payload: event });

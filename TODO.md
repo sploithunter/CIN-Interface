@@ -123,3 +123,5 @@
   - Codex session health checks (offline after 5 min inactivity)
   - Persist codexToManagedMap for session ID stability across restarts
   - Frontend fallback matching by cwd for Codex events
+  - Persist Codex events to events.jsonl (fixes events lost on server restart)
+  - Store codexThreadId in events for reliable cross-restart matching

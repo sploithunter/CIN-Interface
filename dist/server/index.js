@@ -903,21 +903,28 @@ function checkWorkingTimeout() {
         saveSessions();
     }
 }
-/** How long without activity before marking Codex sessions offline */
+/** How long without file activity before marking Codex sessions offline */
 const CODEX_INACTIVE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 /**
- * Check Codex session health based on activity time
- * Mark sessions as offline if they haven't had activity recently
+ * Check Codex session health based on session file modification time.
+ * This is more accurate than lastActivity since the file is updated even
+ * when the session is idle but still running.
  */
 function checkCodexSessionHealth() {
-    const now = Date.now();
+    if (!codexWatcherInstance)
+        return;
     let changed = false;
     for (const session of managedSessions.values()) {
-        // Only check Codex sessions that aren't already offline
-        if (session.agent === 'codex' && session.status !== 'offline') {
-            const inactiveTime = now - session.lastActivity;
-            if (inactiveTime >= CODEX_INACTIVE_THRESHOLD_MS) {
-                log(`Codex session "${session.name}" marked offline (inactive for ${Math.round(inactiveTime / 60000)} min)`);
+        // Only check EXTERNAL Codex sessions - never auto-offline internal sessions
+        // Internal sessions could have unsaved work or background processes
+        if (session.agent === 'codex' &&
+            session.type === 'external' &&
+            session.status !== 'offline' &&
+            session.codexThreadId) {
+            // Check if the session file was modified recently
+            const isActive = codexWatcherInstance.isSessionActive(session.codexThreadId, CODEX_INACTIVE_THRESHOLD_MS);
+            if (!isActive) {
+                log(`Codex session "${session.name}" marked offline (file inactive for 5+ min)`);
                 session.status = 'offline';
                 session.currentTool = undefined;
                 changed = true;
@@ -929,29 +936,47 @@ function checkCodexSessionHealth() {
         saveSessions();
     }
 }
+/** Cleanup time for Codex sessions (shorter since they have no persistent process) */
+const CODEX_CLEANUP_MS = 5 * 60 * 1000; // 5 minutes
 /** Auto-cleanup sessions that have been offline for too long */
 function cleanupStaleOfflineSessions() {
     const now = Date.now();
     const toDelete = [];
-    for (const session of managedSessions.values()) {
-        if (session.status === 'offline') {
-            const offlineTime = now - session.lastActivity;
-            if (offlineTime >= OFFLINE_CLEANUP_MS) {
-                log(`Auto-cleaning stale session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
-                toDelete.push(session.id);
+    // First, get list of active tmux sessions for safety check
+    exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
+        const activeTmuxSessions = error ? new Set() : new Set(stdout.trim().split('\n').filter(Boolean));
+        for (const session of managedSessions.values()) {
+            if (session.status === 'offline') {
+                const offlineTime = now - session.lastActivity;
+                // SAFETY: For internal sessions, only cleanup if tmux session is truly gone
+                // This protects against deleting sessions with active processes
+                if (session.type === 'internal' && session.tmuxSession) {
+                    if (activeTmuxSessions.has(session.tmuxSession)) {
+                        // Tmux session still exists - don't cleanup, something is wrong with our state
+                        continue;
+                    }
+                    // Tmux session is gone (e.g., after reboot) - safe to cleanup after threshold
+                }
+                // External Codex sessions clean up faster (5 min) since they have no persistent process
+                const threshold = session.agent === 'codex' ? CODEX_CLEANUP_MS : OFFLINE_CLEANUP_MS;
+                if (offlineTime >= threshold) {
+                    log(`Auto-cleaning stale ${session.agent || 'claude'} session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
+                    toDelete.push(session.id);
+                }
             }
         }
-    }
-    // Delete sessions (async, but we don't need to wait)
-    for (const id of toDelete) {
-        deleteSession(id);
-    }
+        // Delete sessions
+        for (const id of toDelete) {
+            deleteSession(id);
+        }
+    });
 }
 function saveSessions() {
     try {
         const data = {
             sessions: Array.from(managedSessions.values()),
             claudeToManagedMap: Array.from(claudeToManagedMap.entries()),
+            codexToManagedMap: Array.from(codexToManagedMap.entries()),
             sessionCounter,
         };
         writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
@@ -990,6 +1015,11 @@ function loadSessions() {
         if (Array.isArray(data.claudeToManagedMap)) {
             for (const [claudeId, managedId] of data.claudeToManagedMap) {
                 claudeToManagedMap.set(claudeId, managedId);
+            }
+        }
+        if (Array.isArray(data.codexToManagedMap)) {
+            for (const [threadId, managedId] of data.codexToManagedMap) {
+                codexToManagedMap.set(threadId, managedId);
             }
         }
         if (typeof data.sessionCounter === 'number') {
@@ -1216,22 +1246,45 @@ function findOrCreateExternalSession(claudeSessionId, eventCwd, terminalInfo) {
 // =============================================================================
 /** Map of Codex thread IDs to managed session IDs */
 const codexToManagedMap = new Map();
+/** Reference to Codex watcher for session health checks */
+let codexWatcherInstance = null;
 /**
  * Find existing session or auto-create a session for Codex threads.
+ * Also updates session cwd/name if the event has better info.
  */
 function findOrCreateCodexSession(codexThreadId, eventCwd, name) {
+    // Helper to update session if we have better cwd info
+    const maybeUpdateSession = (session) => {
+        // Update cwd and name if the event has a real path and session has default name
+        if (eventCwd && eventCwd !== session.cwd) {
+            const newDirName = eventCwd.split('/').pop() || 'Codex';
+            // Only update name if it's still the default "Codex Session"
+            if (session.name === 'Codex Session' || session.name === 'Codex') {
+                session.name = newDirName;
+                session.cwd = eventCwd;
+                log(`Updated Codex session name: ${session.name} (cwd: ${eventCwd})`);
+                broadcastSessions();
+                saveSessions();
+            }
+            else if (!session.cwd || session.cwd === process.cwd()) {
+                // Just update cwd if it was defaulted
+                session.cwd = eventCwd;
+            }
+        }
+        return session;
+    };
     // First try lookup by Codex thread ID
     const existingId = codexToManagedMap.get(codexThreadId);
     if (existingId) {
         const existing = managedSessions.get(existingId);
         if (existing)
-            return existing;
+            return maybeUpdateSession(existing);
     }
     // Check if there's a session with matching thread ID
     for (const session of managedSessions.values()) {
         if (session.codexThreadId === codexThreadId) {
             codexToManagedMap.set(codexThreadId, session.id);
-            return session;
+            return maybeUpdateSession(session);
         }
     }
     // Auto-create external session for this Codex thread
@@ -1262,13 +1315,17 @@ function findOrCreateCodexSession(codexThreadId, eventCwd, name) {
  */
 function initCodexWatcher() {
     const codexWatcher = getCodexWatcher({ debug: DEBUG });
+    codexWatcherInstance = codexWatcher;
     codexWatcher.on('event', (event) => {
+        // Store the original Codex thread ID for recovery/matching
+        const codexThreadId = event.sessionId;
         // Find or create session for this event
-        const session = findOrCreateCodexSession(event.sessionId, // This is the Codex thread ID
-        event.cwd);
+        const session = findOrCreateCodexSession(codexThreadId, event.cwd);
         // IMPORTANT: Update event's sessionId to match the managed session's ID
         // so the frontend can properly filter events by session
         event.sessionId = session.id;
+        // Store codexThreadId for future recovery if session ID changes
+        event.codexThreadId = codexThreadId;
         // Update session state based on event
         if (event.type === 'stop') {
             session.status = 'idle';
@@ -1287,6 +1344,13 @@ function initCodexWatcher() {
         if (events.length > MAX_EVENTS) {
             events.shift();
         }
+        // Persist Codex events to events.jsonl (like hook events do)
+        try {
+            appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n');
+        }
+        catch (err) {
+            debug(`Failed to persist Codex event: ${err}`);
+        }
         broadcast({ type: 'event', payload: event });
         broadcastSessions();
         saveSessions();
@@ -1296,6 +1360,37 @@ function initCodexWatcher() {
         findOrCreateCodexSession(info.threadId, info.cwd, info.name);
     });
     codexWatcher.start();
+    // Reconcile existing Codex sessions with actual file data
+    reconcileCodexSessions(codexWatcher);
+}
+/**
+ * Update existing Codex sessions with correct cwd/name from their actual session files
+ */
+function reconcileCodexSessions(watcher) {
+    const allSessionInfo = watcher.getAllSessions();
+    let updated = false;
+    for (const info of allSessionInfo) {
+        // Find the managed session for this thread
+        for (const session of managedSessions.values()) {
+            if (session.codexThreadId === info.threadId) {
+                // Update if cwd differs and name is still default
+                if (info.cwd && info.cwd !== session.cwd) {
+                    const newDirName = info.cwd.split('/').pop() || 'Codex';
+                    if (session.name === 'Codex Session' || session.name === 'Codex') {
+                        log(`Reconciling Codex session: ${session.name} -> ${newDirName}`);
+                        session.name = newDirName;
+                        session.cwd = info.cwd;
+                        updated = true;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    if (updated) {
+        broadcastSessions();
+        saveSessions();
+    }
 }
 // =============================================================================
 // Event Processing

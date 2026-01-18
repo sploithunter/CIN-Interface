@@ -366,12 +366,18 @@ function eventBelongsToSession(event: VibecraftEvent, session: ManagedSession): 
     return true;
   }
 
+  // For Codex sessions, match by codexThreadId (most reliable)
+  const eventCodexThreadId = (event as any).codexThreadId;
+  if (session.codexThreadId && eventCodexThreadId === session.codexThreadId) {
+    return true;
+  }
+
   // If session has a Claude session ID, filter strictly by that
   if (session.claudeSessionId) {
     return event.sessionId === session.claudeSessionId;
   }
 
-  // For Codex sessions, also match by cwd (handles events from before session ID was fixed)
+  // For Codex sessions, also match by cwd (handles old events without codexThreadId)
   if (session.codexThreadId && session.cwd && event.cwd === session.cwd) {
     // Make sure this event doesn't belong to another Codex session with same cwd
     const otherCodexSessionIds = sessions
