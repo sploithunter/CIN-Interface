@@ -45,10 +45,13 @@
 - [x] Add expand/collapse for large responses in activity feed
 - [x] Add option to minimize 3D map and maximize chat/activity interface
 - [ ] Add expand/collapse for Bash/script output in activity feed
+- [ ] Add expand/collapse for agent/subagent actions in activity feed
+- [ ] Auto-cleanup stale sessions (detect and remove sessions killed externally)
 
 ### Medium Priority
 - [ ] Permission prompt handling in web UI
-- [ ] Drag and drop images into prompt input (for screenshots)
+- [ ] Drag and drop images into prompt input (research how Claude CLI handles image paths)
+- [ ] File explorer for current repo (view/navigate edited files)
 
 ### Low Priority / Future
 - [ ] Text labels on hex grid (partially implemented)
@@ -58,8 +61,12 @@
 
 ### Ambitious Features
 - [ ] Browser preview pane for web development (agent can screenshot it)
-- [ ] Remote management of CIN-Interface
-- [ ] Multi-user support for remote access
+- [ ] Remote access (local network / internet) - requires infrastructure
+  - [ ] Authentication system
+  - [ ] WebSocket proxy / tunneling
+- [ ] Community leaderboard - opt-in stats sharing
+  - [ ] Project name, tokens expended, activity stats
+  - [ ] Public dashboard for participating users
 
 ---
 
