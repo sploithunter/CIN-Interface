@@ -45,7 +45,7 @@
 - [x] Add expand/collapse for large responses in activity feed
 - [x] Add option to minimize 3D map and maximize chat/activity interface
 - [x] Add expand/collapse for Bash/script output in activity feed
-- [ ] Add expand/collapse for agent/subagent actions in activity feed
+- [x] Add expand/collapse for agent/subagent actions in activity feed
 - [x] Auto-cleanup stale sessions (detect and remove sessions killed externally)
 
 ### Medium Priority
