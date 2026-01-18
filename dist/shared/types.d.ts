@@ -119,6 +119,7 @@ export interface SessionFlags {
 export interface CreateSessionOptions {
     name?: string;
     cwd?: string;
+    agent?: AgentType;
     flags?: SessionFlags;
     zonePosition?: ZonePosition;
 }

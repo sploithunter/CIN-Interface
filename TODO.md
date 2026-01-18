@@ -50,8 +50,17 @@
 
 ### Medium Priority
 - [x] Permission prompt handling in web UI
-- [ ] Drag and drop images into prompt input (research how Claude CLI handles image paths)
-- [ ] File explorer for current repo (view/navigate edited files)
+- [x] Image support in prompts (API supports base64 images, saves to .cin-images/)
+  - [x] Backend API accepts images in POST /sessions/:id/prompt
+  - [x] Images saved to session's .cin-images/ directory
+  - [x] Image paths included in prompt for Claude/Codex to read
+  - [ ] Frontend: Drag and drop images (requires frontend modification)
+  - [ ] Frontend: Paste images from clipboard (requires frontend modification)
+- [x] File explorer API for current repo
+  - [x] GET /sessions/:id/files - List files in directory
+  - [x] GET /sessions/:id/file - Read file content (with size limits)
+  - [x] GET /sessions/:id/files/tree - Get directory tree
+  - [ ] Frontend: File explorer UI component (requires frontend modification)
 
 ### Agent Integrations
 - [x] OpenAI Codex CLI integration Phase 1 (first non-Claude agent) - See [CODEX_INTEGRATION.md](docs/CODEX_INTEGRATION.md)
@@ -73,7 +82,10 @@
   - [x] Add `setup-codex` CLI command (configures ~/.codex/config.toml)
   - [x] Update uninstall command to remove Codex hooks
   - [x] Add Codex checks to doctor command
-- [ ] Codex CLI Phase 3: SDK integration for internal Codex sessions
+- [x] Codex CLI Phase 3: Internal Codex sessions via tmux
+  - [x] POST /sessions accepts `agent: 'codex'` to create Codex sessions
+  - [x] Session restart uses correct agent command (claude or codex)
+  - [x] Codex sessions run with `--full-auto` flag by default
 
 ### Low Priority / Future
 - [ ] Text labels on hex grid (partially implemented)
@@ -147,3 +159,17 @@
   - Added `cin-interface setup-codex` command to configure ~/.codex/config.toml
   - Updated uninstall command to remove Codex hooks and config
   - Added Codex configuration checks to doctor command
+- File Explorer API:
+  - GET /sessions/:id/files - List files/directories (sorted, directories first)
+  - GET /sessions/:id/file - Read file content (1MB limit, binary detection)
+  - GET /sessions/:id/files/tree - Recursive directory tree (configurable depth)
+  - Security: Path validation ensures requests stay within session's cwd
+- Image Support in Prompts:
+  - POST /sessions/:id/prompt now accepts `images` array with base64 data
+  - Images saved to `.cin-images/` directory in session's cwd
+  - Image paths prepended to prompt for Claude/Codex to read
+  - Validation: max 5MB per image, supported types: jpeg, png, gif, webp
+- Codex Phase 3: Internal Codex sessions:
+  - POST /sessions accepts `agent: 'codex'` to spawn Codex CLI via tmux
+  - Codex sessions run with `--full-auto` flag (workspace-write + on-request approval)
+  - Session restart uses correct agent command based on session.agent type

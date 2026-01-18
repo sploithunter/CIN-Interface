@@ -185,6 +185,7 @@ export interface SessionFlags {
 export interface CreateSessionOptions {
   name?: string;
   cwd?: string;
+  agent?: AgentType;  // 'claude' (default) or 'codex'
   flags?: SessionFlags;
   zonePosition?: ZonePosition;
 }

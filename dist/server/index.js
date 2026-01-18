@@ -12,7 +12,7 @@
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { watch } from 'chokidar';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, unlinkSync, statSync, } from 'fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, unlinkSync, statSync, readdirSync, } from 'fs';
 import { exec, execFile, execSync } from 'child_process';
 import { dirname, resolve, join, extname, basename } from 'path';
 import { hostname } from 'os';
@@ -657,43 +657,55 @@ function createSession(options = {}) {
         }
         // Default name to the directory name (project name)
         const name = options.name || basename(cwd);
+        const agent = options.agent || 'claude';
         const flags = options.flags || {};
-        const claudeArgs = [];
-        // Don't use -c by default - each new session should start fresh
-        // Otherwise it might continue an existing conversation (like this one!)
-        if (flags.continue === true) {
-            claudeArgs.push('-c');
+        // Build command based on agent type
+        let agentCmd;
+        if (agent === 'codex') {
+            // Codex CLI command with sensible defaults
+            const codexArgs = [];
+            codexArgs.push('--full-auto'); // workspace-write sandbox + on-request approval
+            agentCmd = codexArgs.length > 0 ? `codex ${codexArgs.join(' ')}` : 'codex';
         }
-        if (flags.skipPermissions !== false) {
-            claudeArgs.push('--permission-mode=bypassPermissions');
-            claudeArgs.push('--dangerously-skip-permissions');
+        else {
+            // Claude CLI command
+            const claudeArgs = [];
+            // Don't use -c by default - each new session should start fresh
+            // Otherwise it might continue an existing conversation (like this one!)
+            if (flags.continue === true) {
+                claudeArgs.push('-c');
+            }
+            if (flags.skipPermissions !== false) {
+                claudeArgs.push('--permission-mode=bypassPermissions');
+                claudeArgs.push('--dangerously-skip-permissions');
+            }
+            if (flags.chrome) {
+                claudeArgs.push('--chrome');
+            }
+            agentCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude';
         }
-        if (flags.chrome) {
-            claudeArgs.push('--chrome');
-        }
-        const claudeCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude';
-        // Two-step approach: create session without command, then send claude via send-keys
-        // This prevents the session from closing when Claude exits or has startup issues
+        // Two-step approach: create session without command, then send agent command via send-keys
+        // This prevents the session from closing when the agent exits or has startup issues
         execFile('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], EXEC_OPTIONS, (createError) => {
             if (createError) {
                 log(`Failed to create tmux session: ${createError.message}`);
                 reject(new Error(`Failed to create tmux session: ${createError.message}`));
                 return;
             }
-            // Now send the Claude command to the session
-            execFile('tmux', ['send-keys', '-t', tmuxSession, claudeCmd, 'Enter'], EXEC_OPTIONS, (sendError) => {
+            // Now send the agent command to the session
+            execFile('tmux', ['send-keys', '-t', tmuxSession, agentCmd, 'Enter'], EXEC_OPTIONS, (sendError) => {
                 if (sendError) {
                     log(`Failed to send command to session: ${sendError.message}`);
-                    // Kill the empty session since we couldn't start Claude
+                    // Kill the empty session since we couldn't start the agent
                     exec(`tmux kill-session -t ${tmuxSession}`, EXEC_OPTIONS);
-                    reject(new Error(`Failed to start Claude: ${sendError.message}`));
+                    reject(new Error(`Failed to start ${agent}: ${sendError.message}`));
                     return;
                 }
                 const session = {
                     id,
                     name,
                     type: 'internal',
-                    agent: 'claude',
+                    agent,
                     tmuxSession,
                     status: 'idle',
                     createdAt: Date.now(),
@@ -702,7 +714,7 @@ function createSession(options = {}) {
                     zonePosition: options.zonePosition,
                 };
                 managedSessions.set(id, session);
-                log(`Created session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession}`);
+                log(`Created ${agent} session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession}`);
                 if (cwd) {
                     gitStatusManager.track(id, cwd);
                     projectsManager.addProject(cwd, name);
@@ -849,18 +861,49 @@ async function sendToTmuxPane(tmuxPane, tmuxSocket, text) {
         }
     }
 }
-async function sendPromptToSession(id, prompt) {
+async function sendPromptToSession(id, prompt, images) {
     const session = managedSessions.get(id);
     if (!session) {
         return { ok: false, error: 'Session not found' };
     }
+    // Process images if provided - save to temp files in session's cwd
+    const savedImagePaths = [];
+    if (images && images.length > 0) {
+        const imageDir = join(session.cwd, '.cin-images');
+        if (!existsSync(imageDir)) {
+            mkdirSync(imageDir, { recursive: true });
+        }
+        for (let i = 0; i < images.length; i++) {
+            const img = images[i];
+            const ext = img.mediaType.split('/')[1] || 'png';
+            const filename = img.name || `image-${Date.now()}-${i}.${ext}`;
+            const imagePath = join(imageDir, filename);
+            try {
+                // Decode base64 and write to file
+                const buffer = Buffer.from(img.data, 'base64');
+                writeFileSync(imagePath, buffer);
+                savedImagePaths.push(imagePath);
+                log(`Saved image: ${imagePath} (${(buffer.length / 1024).toFixed(1)}KB)`);
+            }
+            catch (e) {
+                log(`Failed to save image ${filename}: ${e.message}`);
+            }
+        }
+    }
+    // Build the full prompt with image references
+    let fullPrompt = prompt;
+    if (savedImagePaths.length > 0) {
+        const imageRefs = savedImagePaths.map(p => `[Image: ${p}]`).join('\n');
+        fullPrompt = `${imageRefs}\n\n${prompt}`;
+        log(`Prompt includes ${savedImagePaths.length} image(s)`);
+    }
     // Internal sessions use their managed tmux session
     if (session.tmuxSession) {
         try {
-            await sendToTmuxSafe(session.tmuxSession, prompt);
+            await sendToTmuxSafe(session.tmuxSession, fullPrompt);
             session.lastActivity = Date.now();
             log(`Prompt sent to ${session.name}: ${prompt.slice(0, 50)}...`);
-            return { ok: true };
+            return { ok: true, imagePaths: savedImagePaths.length > 0 ? savedImagePaths : undefined };
         }
         catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -871,10 +914,10 @@ async function sendPromptToSession(id, prompt) {
     // External sessions - try to use captured terminal info
     if (session.terminal?.tmuxPane) {
         try {
-            await sendToTmuxPane(session.terminal.tmuxPane, session.terminal.tmuxSocket, prompt);
+            await sendToTmuxPane(session.terminal.tmuxPane, session.terminal.tmuxSocket, fullPrompt);
             session.lastActivity = Date.now();
             log(`Prompt sent to external ${session.name} via tmux pane ${session.terminal.tmuxPane}: ${prompt.slice(0, 50)}...`);
-            return { ok: true };
+            return { ok: true, imagePaths: savedImagePaths.length > 0 ? savedImagePaths : undefined };
         }
         catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
@@ -1845,16 +1888,40 @@ async function handleHttpRequest(req, res) {
             return;
         }
         // POST /sessions/:id/prompt
+        // Accepts: { prompt: string, images?: Array<{ data: string, mediaType: string, name?: string }> }
         if (req.method === 'POST' && action === 'prompt') {
             try {
                 const body = await collectRequestBody(req);
-                const { prompt } = JSON.parse(body);
+                const { prompt, images } = JSON.parse(body);
                 if (!prompt) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ ok: false, error: 'Prompt is required' }));
                     return;
                 }
-                const result = await sendPromptToSession(sessionId, prompt);
+                // Validate images if provided
+                if (images) {
+                    const validMediaTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                    for (const img of images) {
+                        if (!img.data || !img.mediaType) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ ok: false, error: 'Each image must have data and mediaType' }));
+                            return;
+                        }
+                        if (!validMediaTypes.includes(img.mediaType)) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ ok: false, error: `Invalid mediaType: ${img.mediaType}. Supported: ${validMediaTypes.join(', ')}` }));
+                            return;
+                        }
+                        // Check image size (max 5MB)
+                        const sizeBytes = Buffer.from(img.data, 'base64').length;
+                        if (sizeBytes > 5 * 1024 * 1024) {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ ok: false, error: `Image too large (${(sizeBytes / 1024 / 1024).toFixed(2)}MB). Maximum is 5MB.` }));
+                            return;
+                        }
+                    }
+                }
+                const result = await sendPromptToSession(sessionId, prompt, images);
                 res.writeHead(result.ok ? 200 : 404, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(result));
             }
@@ -1935,20 +2002,27 @@ async function handleHttpRequest(req, res) {
                 return;
             }
             const tmuxSessionName = session.tmuxSession; // TypeScript now knows this is string
+            // Build command based on agent type
+            let agentCmd;
+            if (session.agent === 'codex') {
+                agentCmd = 'codex --full-auto';
+            }
+            else {
+                agentCmd = 'claude --permission-mode=bypassPermissions --dangerously-skip-permissions';
+            }
             // Kill existing tmux session if it exists (ignore errors)
             execFile('tmux', ['kill-session', '-t', tmuxSessionName], EXEC_OPTIONS, () => {
-                // Two-step approach: create session without command, then send claude via send-keys
+                // Two-step approach: create session without command, then send agent command via send-keys
                 execFile('tmux', ['new-session', '-d', '-s', tmuxSessionName, '-c', cwd], EXEC_OPTIONS, (createError) => {
                     if (createError) {
                         res.writeHead(500, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ ok: false, error: `Failed to create session: ${createError.message}` }));
                         return;
                     }
-                    // Send the Claude command to the session
-                    const claudeCmd = 'claude --permission-mode=bypassPermissions --dangerously-skip-permissions';
-                    execFile('tmux', ['send-keys', '-t', tmuxSessionName, claudeCmd, 'Enter'], EXEC_OPTIONS, (sendError) => {
+                    // Send the agent command to the session
+                    execFile('tmux', ['send-keys', '-t', tmuxSessionName, agentCmd, 'Enter'], EXEC_OPTIONS, (sendError) => {
                         if (sendError) {
-                            // Kill the empty session since we couldn't start Claude
+                            // Kill the empty session since we couldn't start the agent
                             exec(`tmux kill-session -t ${tmuxSessionName}`, EXEC_OPTIONS);
                             res.writeHead(500, { 'Content-Type': 'application/json' });
                             res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${sendError.message}` }));
@@ -1957,6 +2031,7 @@ async function handleHttpRequest(req, res) {
                         session.status = 'idle';
                         session.lastActivity = Date.now();
                         session.claudeSessionId = undefined;
+                        session.codexThreadId = undefined;
                         session.currentTool = undefined;
                         // Clear old linking
                         for (const [claudeId, managedId] of claudeToManagedMap) {
@@ -1964,7 +2039,7 @@ async function handleHttpRequest(req, res) {
                                 claudeToManagedMap.delete(claudeId);
                             }
                         }
-                        log(`Restarted session: ${session.name} (${session.id.slice(0, 8)})`);
+                        log(`Restarted ${session.agent} session: ${session.name} (${session.id.slice(0, 8)})`);
                         broadcastSessions();
                         saveSessions();
                         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2047,6 +2122,242 @@ async function handleHttpRequest(req, res) {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, path: defaultPath }));
+        return;
+    }
+    // ==========================================================================
+    // File Explorer Endpoints
+    // ==========================================================================
+    // GET /sessions/:id/files - List files in session's directory
+    const filesMatch = req.url?.match(/^\/sessions\/([a-f0-9-]+)\/files(\?.*)?$/);
+    if (req.method === 'GET' && filesMatch) {
+        const sessionId = filesMatch[1];
+        const session = managedSessions.get(sessionId);
+        if (!session) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
+            return;
+        }
+        // Get path from query params, default to session's cwd
+        const urlObj = new URL(req.url, `http://localhost:${PORT}`);
+        let requestedPath = urlObj.searchParams.get('path') || session.cwd;
+        // Expand ~ to home directory
+        if (requestedPath.startsWith('~')) {
+            requestedPath = requestedPath.replace('~', process.env.HOME || '');
+        }
+        // Security: Ensure requested path is within session's cwd
+        const resolvedPath = resolve(requestedPath);
+        const resolvedCwd = resolve(session.cwd);
+        if (!resolvedPath.startsWith(resolvedCwd) && resolvedPath !== resolvedCwd) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Access denied: path outside session directory' }));
+            return;
+        }
+        try {
+            if (!existsSync(resolvedPath)) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Path not found' }));
+                return;
+            }
+            const stats = statSync(resolvedPath);
+            if (!stats.isDirectory()) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Path is not a directory' }));
+                return;
+            }
+            const entries = readdirSync(resolvedPath, { withFileTypes: true });
+            const files = entries
+                .filter(entry => !entry.name.startsWith('.')) // Skip hidden files by default
+                .map(entry => {
+                const fullPath = join(resolvedPath, entry.name);
+                let size;
+                let modified;
+                try {
+                    const entryStats = statSync(fullPath);
+                    size = entryStats.size;
+                    modified = entryStats.mtimeMs;
+                }
+                catch {
+                    // Ignore stat errors (permission issues, etc.)
+                }
+                return {
+                    name: entry.name,
+                    path: fullPath,
+                    type: entry.isDirectory() ? 'directory' : 'file',
+                    size,
+                    modified,
+                };
+            })
+                .sort((a, b) => {
+                // Directories first, then alphabetically
+                if (a.type === 'directory' && b.type !== 'directory')
+                    return -1;
+                if (a.type !== 'directory' && b.type === 'directory')
+                    return 1;
+                return a.name.localeCompare(b.name);
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                ok: true,
+                path: resolvedPath,
+                cwd: session.cwd,
+                files,
+            }));
+        }
+        catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: `Failed to read directory: ${e.message}` }));
+        }
+        return;
+    }
+    // GET /sessions/:id/file - Read file content
+    const fileMatch = req.url?.match(/^\/sessions\/([a-f0-9-]+)\/file(\?.*)?$/);
+    if (req.method === 'GET' && fileMatch) {
+        const sessionId = fileMatch[1];
+        const session = managedSessions.get(sessionId);
+        if (!session) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
+            return;
+        }
+        const urlObj = new URL(req.url, `http://localhost:${PORT}`);
+        const requestedPath = urlObj.searchParams.get('path');
+        if (!requestedPath) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Missing path parameter' }));
+            return;
+        }
+        // Expand ~ to home directory
+        let expandedPath = requestedPath;
+        if (expandedPath.startsWith('~')) {
+            expandedPath = expandedPath.replace('~', process.env.HOME || '');
+        }
+        // Security: Ensure requested path is within session's cwd
+        const resolvedPath = resolve(expandedPath);
+        const resolvedCwd = resolve(session.cwd);
+        if (!resolvedPath.startsWith(resolvedCwd)) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Access denied: path outside session directory' }));
+            return;
+        }
+        try {
+            if (!existsSync(resolvedPath)) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'File not found' }));
+                return;
+            }
+            const stats = statSync(resolvedPath);
+            if (stats.isDirectory()) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Path is a directory, not a file' }));
+                return;
+            }
+            // Limit file size to 1MB for safety
+            const MAX_FILE_SIZE = 1024 * 1024;
+            if (stats.size > MAX_FILE_SIZE) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    ok: false,
+                    error: `File too large (${(stats.size / 1024 / 1024).toFixed(2)}MB). Maximum is 1MB.`,
+                }));
+                return;
+            }
+            // Detect binary files by extension
+            const binaryExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.zip', '.tar', '.gz', '.exe', '.dll', '.so', '.dylib'];
+            const ext = extname(resolvedPath).toLowerCase();
+            if (binaryExtensions.includes(ext)) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Binary files cannot be displayed' }));
+                return;
+            }
+            const content = readFileSync(resolvedPath, 'utf-8');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                ok: true,
+                path: resolvedPath,
+                name: basename(resolvedPath),
+                size: stats.size,
+                modified: stats.mtimeMs,
+                content,
+            }));
+        }
+        catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: `Failed to read file: ${e.message}` }));
+        }
+        return;
+    }
+    // GET /sessions/:id/files/tree - Get directory tree
+    const treeMatch = req.url?.match(/^\/sessions\/([a-f0-9-]+)\/files\/tree(\?.*)?$/);
+    if (req.method === 'GET' && treeMatch) {
+        const sessionId = treeMatch[1];
+        const session = managedSessions.get(sessionId);
+        if (!session) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
+            return;
+        }
+        const urlObj = new URL(req.url, `http://localhost:${PORT}`);
+        let requestedPath = urlObj.searchParams.get('path') || session.cwd;
+        const maxDepth = Math.min(parseInt(urlObj.searchParams.get('depth') || '3', 10), 5);
+        const includeHidden = urlObj.searchParams.get('hidden') === 'true';
+        // Expand ~ to home directory
+        if (requestedPath.startsWith('~')) {
+            requestedPath = requestedPath.replace('~', process.env.HOME || '');
+        }
+        // Security: Ensure requested path is within session's cwd
+        const resolvedPath = resolve(requestedPath);
+        const resolvedCwd = resolve(session.cwd);
+        if (!resolvedPath.startsWith(resolvedCwd) && resolvedPath !== resolvedCwd) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Access denied: path outside session directory' }));
+            return;
+        }
+        function buildTree(dirPath, depth) {
+            if (depth <= 0)
+                return [];
+            try {
+                const entries = readdirSync(dirPath, { withFileTypes: true });
+                return entries
+                    .filter(entry => includeHidden || !entry.name.startsWith('.'))
+                    .filter(entry => entry.name !== 'node_modules' && entry.name !== '.git') // Skip large dirs
+                    .map(entry => {
+                    const fullPath = join(dirPath, entry.name);
+                    const node = {
+                        name: entry.name,
+                        path: fullPath,
+                        type: entry.isDirectory() ? 'directory' : 'file',
+                    };
+                    if (entry.isDirectory()) {
+                        node.children = buildTree(fullPath, depth - 1);
+                    }
+                    return node;
+                })
+                    .sort((a, b) => {
+                    if (a.type === 'directory' && b.type !== 'directory')
+                        return -1;
+                    if (a.type !== 'directory' && b.type === 'directory')
+                        return 1;
+                    return a.name.localeCompare(b.name);
+                });
+            }
+            catch {
+                return [];
+            }
+        }
+        try {
+            const tree = buildTree(resolvedPath, maxDepth);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                ok: true,
+                path: resolvedPath,
+                cwd: session.cwd,
+                tree,
+            }));
+        }
+        catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: `Failed to build tree: ${e.message}` }));
+        }
         return;
     }
     // GET /tiles
