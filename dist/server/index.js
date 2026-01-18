@@ -13,7 +13,7 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { watch } from 'chokidar';
 import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, unlinkSync, statSync, } from 'fs';
-import { exec, execFile } from 'child_process';
+import { exec, execFile, execSync } from 'child_process';
 import { dirname, resolve, join, extname, basename } from 'path';
 import { hostname } from 'os';
 import { randomUUID, randomBytes } from 'crypto';
@@ -780,9 +780,43 @@ function deleteSession(id) {
             cleanup(); // Still clean up the session record
             return;
         }
+        // On macOS, get the Terminal window ID before killing tmux so we can close it
+        let terminalWindowId = null;
+        if (process.platform === 'darwin') {
+            try {
+                const result = execSync(`osascript -e '
+          tell application "Terminal"
+            repeat with w in windows
+              if name of w contains "${session.tmuxSession}" then
+                return id of w
+              end if
+            end repeat
+          end tell
+        '`, { encoding: 'utf8', timeout: 5000 }).trim();
+                if (result && /^\d+$/.test(result)) {
+                    terminalWindowId = result;
+                }
+            }
+            catch {
+                // Ignore - window may not exist or Terminal not running
+            }
+        }
         execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, (error) => {
             if (error) {
                 log(`Warning: Failed to kill tmux session: ${error.message}`);
+            }
+            // On macOS, close the Terminal window that was attached to this session
+            // Add a small delay to let the tmux detach complete before closing Terminal
+            if (terminalWindowId) {
+                setTimeout(() => {
+                    try {
+                        execSync(`osascript -e 'tell application "Terminal" to close (first window whose id is ${terminalWindowId})'`, { timeout: 5000 });
+                        debug(`Closed Terminal window ${terminalWindowId} for session ${session.tmuxSession}`);
+                    }
+                    catch {
+                        // Ignore - window may have already closed
+                    }
+                }, 500);
             }
             cleanup();
         });
@@ -2024,6 +2058,25 @@ async function handleHttpRequest(req, res) {
         catch {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: 'Invalid JSON' }));
+        }
+        return;
+    }
+    // DELETE /tiles/:id
+    const tileDeleteMatch = req.url?.match(/^\/tiles\/([a-f0-9-]+)$/);
+    if (req.method === 'DELETE' && tileDeleteMatch) {
+        const tileId = tileDeleteMatch[1];
+        const tile = textTiles.get(tileId);
+        if (tile) {
+            textTiles.delete(tileId);
+            saveTiles();
+            broadcastTiles();
+            log(`Deleted text tile: "${tile.text}"`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+        }
+        else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Tile not found' }));
         }
         return;
     }
