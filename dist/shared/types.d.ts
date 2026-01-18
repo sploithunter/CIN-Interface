@@ -18,6 +18,7 @@ export interface BaseEvent {
     type: EventType;
     sessionId: string;
     cwd: string;
+    agent?: AgentType;
 }
 /** Pre-tool-use event */
 export interface PreToolUseEvent extends BaseEvent {
@@ -86,6 +87,7 @@ export interface UnknownEvent extends BaseEvent {
 export type VibecraftEvent = PreToolUseEvent | PostToolUseEvent | StopEvent | SessionStartEvent | SessionEndEvent | UserPromptSubmitEvent | NotificationEvent | PreCompactEvent | UnknownEvent;
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline';
 export type SessionType = 'internal' | 'external';
+export type AgentType = 'claude' | 'codex';
 export interface ZonePosition {
     q: number;
     r: number;
@@ -94,12 +96,14 @@ export interface ManagedSession {
     id: string;
     name: string;
     type: SessionType;
+    agent: AgentType;
     tmuxSession?: string;
     status: SessionStatus;
     createdAt: number;
     lastActivity: number;
     cwd: string;
     claudeSessionId?: string;
+    codexThreadId?: string;
     currentTool?: string;
     zonePosition?: ZonePosition;
     suggestion?: string;
@@ -200,4 +204,41 @@ export declare const DEFAULT_CONFIG: {
     maxEventsInMemory: number;
     debug: boolean;
 };
+/** Codex event types from --json output */
+export type CodexEventType = 'thread.started' | 'turn.started' | 'turn.completed' | 'turn.failed' | 'item.started' | 'item.completed' | 'error';
+/** Codex item types */
+export type CodexItemType = 'agent_message' | 'command_execution' | 'file_change' | 'mcp_tool_call' | 'web_search' | 'plan_update' | 'reasoning';
+/** Codex token usage */
+export interface CodexUsage {
+    input_tokens: number;
+    cached_input_tokens: number;
+    output_tokens: number;
+}
+/** Codex item structure */
+export interface CodexItem {
+    id: string;
+    type: CodexItemType;
+    status?: string;
+    text?: string;
+    command?: string;
+    output?: string;
+    exit_code?: number;
+    file_path?: string;
+    operation?: string;
+    query?: string;
+    tool_name?: string;
+    tool_input?: Record<string, unknown>;
+}
+/** Raw Codex event from JSONL */
+export interface CodexRawEvent {
+    type: CodexEventType;
+    thread_id?: string;
+    turn_id?: string;
+    item?: CodexItem;
+    usage?: CodexUsage;
+    error?: {
+        message: string;
+        code?: string;
+    };
+}
 //# sourceMappingURL=types.d.ts.map

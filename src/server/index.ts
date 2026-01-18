@@ -1078,6 +1078,36 @@ function checkWorkingTimeout(): void {
   }
 }
 
+/** How long without activity before marking Codex sessions offline */
+const CODEX_INACTIVE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Check Codex session health based on activity time
+ * Mark sessions as offline if they haven't had activity recently
+ */
+function checkCodexSessionHealth(): void {
+  const now = Date.now();
+  let changed = false;
+
+  for (const session of managedSessions.values()) {
+    // Only check Codex sessions that aren't already offline
+    if (session.agent === 'codex' && session.status !== 'offline') {
+      const inactiveTime = now - session.lastActivity;
+      if (inactiveTime >= CODEX_INACTIVE_THRESHOLD_MS) {
+        log(`Codex session "${session.name}" marked offline (inactive for ${Math.round(inactiveTime / 60000)} min)`);
+        session.status = 'offline';
+        session.currentTool = undefined;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    broadcastSessions();
+    saveSessions();
+  }
+}
+
 /** Auto-cleanup sessions that have been offline for too long */
 function cleanupStaleOfflineSessions(): void {
   const now = Date.now();
@@ -1102,6 +1132,7 @@ function cleanupStaleOfflineSessions(): void {
 interface SavedSessionsData {
   sessions: ManagedSession[];
   claudeToManagedMap: [string, string][];
+  codexToManagedMap?: [string, string][];
   sessionCounter: number;
 }
 
@@ -1110,6 +1141,7 @@ function saveSessions(): void {
     const data: SavedSessionsData = {
       sessions: Array.from(managedSessions.values()),
       claudeToManagedMap: Array.from(claudeToManagedMap.entries()),
+      codexToManagedMap: Array.from(codexToManagedMap.entries()),
       sessionCounter,
     };
     writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
@@ -1154,6 +1186,12 @@ function loadSessions(): void {
     if (Array.isArray(data.claudeToManagedMap)) {
       for (const [claudeId, managedId] of data.claudeToManagedMap) {
         claudeToManagedMap.set(claudeId, managedId);
+      }
+    }
+
+    if (Array.isArray(data.codexToManagedMap)) {
+      for (const [threadId, managedId] of data.codexToManagedMap) {
+        codexToManagedMap.set(threadId, managedId);
       }
     }
 
@@ -1418,20 +1456,41 @@ const codexToManagedMap = new Map<string, string>();
 
 /**
  * Find existing session or auto-create a session for Codex threads.
+ * Also updates session cwd/name if the event has better info.
  */
 function findOrCreateCodexSession(codexThreadId: string, eventCwd: string, name?: string): ManagedSession {
+  // Helper to update session if we have better cwd info
+  const maybeUpdateSession = (session: ManagedSession): ManagedSession => {
+    // Update cwd and name if the event has a real path and session has default name
+    if (eventCwd && eventCwd !== session.cwd) {
+      const newDirName = eventCwd.split('/').pop() || 'Codex';
+      // Only update name if it's still the default "Codex Session"
+      if (session.name === 'Codex Session' || session.name === 'Codex') {
+        session.name = newDirName;
+        session.cwd = eventCwd;
+        log(`Updated Codex session name: ${session.name} (cwd: ${eventCwd})`);
+        broadcastSessions();
+        saveSessions();
+      } else if (!session.cwd || session.cwd === process.cwd()) {
+        // Just update cwd if it was defaulted
+        session.cwd = eventCwd;
+      }
+    }
+    return session;
+  };
+
   // First try lookup by Codex thread ID
   const existingId = codexToManagedMap.get(codexThreadId);
   if (existingId) {
     const existing = managedSessions.get(existingId);
-    if (existing) return existing;
+    if (existing) return maybeUpdateSession(existing);
   }
 
   // Check if there's a session with matching thread ID
   for (const session of managedSessions.values()) {
     if (session.codexThreadId === codexThreadId) {
       codexToManagedMap.set(codexThreadId, session.id);
-      return session;
+      return maybeUpdateSession(session);
     }
   }
 
@@ -1472,16 +1531,22 @@ function initCodexWatcher(): void {
   codexWatcher.on('event', (event: VibecraftEvent) => {
     // Find or create session for this event
     const session = findOrCreateCodexSession(
-      event.sessionId,
+      event.sessionId, // This is the Codex thread ID
       event.cwd,
     );
+
+    // IMPORTANT: Update event's sessionId to match the managed session's ID
+    // so the frontend can properly filter events by session
+    event.sessionId = session.id;
 
     // Update session state based on event
     if (event.type === 'stop') {
       session.status = 'idle';
       session.currentTool = undefined;
-    } else if (event.type === 'post_tool_use') {
+    } else if (event.type === 'pre_tool_use') {
       session.status = 'working';
+      session.currentTool = (event as PreToolUseEvent).tool;
+    } else if (event.type === 'post_tool_use') {
       session.currentTool = (event as PostToolUseEvent).tool;
     }
     session.lastActivity = Date.now();
@@ -1503,6 +1568,41 @@ function initCodexWatcher(): void {
   });
 
   codexWatcher.start();
+
+  // Reconcile existing Codex sessions with actual file data
+  reconcileCodexSessions(codexWatcher);
+}
+
+/**
+ * Update existing Codex sessions with correct cwd/name from their actual session files
+ */
+function reconcileCodexSessions(watcher: CodexSessionWatcher): void {
+  const allSessionInfo = watcher.getAllSessions();
+  let updated = false;
+
+  for (const info of allSessionInfo) {
+    // Find the managed session for this thread
+    for (const session of managedSessions.values()) {
+      if (session.codexThreadId === info.threadId) {
+        // Update if cwd differs and name is still default
+        if (info.cwd && info.cwd !== session.cwd) {
+          const newDirName = info.cwd.split('/').pop() || 'Codex';
+          if (session.name === 'Codex Session' || session.name === 'Codex') {
+            log(`Reconciling Codex session: ${session.name} -> ${newDirName}`);
+            session.name = newDirName;
+            session.cwd = info.cwd;
+            updated = true;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  if (updated) {
+    broadcastSessions();
+    saveSessions();
+  }
 }
 
 // =============================================================================
@@ -2356,8 +2456,10 @@ function main(): void {
     startRalphWiggumPolling();
     setInterval(checkSessionHealth, 5000);
     setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS);
+    setInterval(checkCodexSessionHealth, 30_000); // Check every 30 seconds
     setInterval(cleanupStaleOfflineSessions, 60_000); // Check every minute
     checkSessionHealth();
+    checkCodexSessionHealth(); // Mark inactive Codex sessions as offline
     cleanupStaleOfflineSessions(); // Run once at startup
   });
 }

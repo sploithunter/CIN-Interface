@@ -21,6 +21,7 @@ import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
 import { DEFAULTS } from '../shared/defaults.js';
 import { GitStatusManager } from './GitStatusManager.js';
 import { ProjectsManager } from './ProjectsManager.js';
+import { getCodexWatcher } from './CodexSessionWatcher.js';
 import { fileURLToPath } from 'url';
 // =============================================================================
 // Version (read from package.json)
@@ -68,6 +69,8 @@ const SESSIONS_FILE = resolve(expandHome(process.env.VIBECRAFT_SESSIONS_FILE ?? 
 const TILES_FILE = resolve(expandHome(process.env.VIBECRAFT_TILES_FILE ?? '~/.vibecraft/data/tiles.json'));
 /** Time before a "working" session auto-transitions to idle */
 const WORKING_TIMEOUT_MS = 120_000; // 2 minutes
+/** Time before offline sessions are auto-cleaned (1 hour) */
+const OFFLINE_CLEANUP_MS = 60 * 60 * 1000; // 1 hour
 /** Maximum request body size (1MB) */
 const MAX_BODY_SIZE = 1024 * 1024;
 /** How often to check for stale "working" sessions */
@@ -690,6 +693,7 @@ function createSession(options = {}) {
                     id,
                     name,
                     type: 'internal',
+                    agent: 'claude',
                     tmuxSession,
                     status: 'idle',
                     createdAt: Date.now(),
@@ -899,6 +903,50 @@ function checkWorkingTimeout() {
         saveSessions();
     }
 }
+/** How long without activity before marking Codex sessions offline */
+const CODEX_INACTIVE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+/**
+ * Check Codex session health based on activity time
+ * Mark sessions as offline if they haven't had activity recently
+ */
+function checkCodexSessionHealth() {
+    const now = Date.now();
+    let changed = false;
+    for (const session of managedSessions.values()) {
+        // Only check Codex sessions that aren't already offline
+        if (session.agent === 'codex' && session.status !== 'offline') {
+            const inactiveTime = now - session.lastActivity;
+            if (inactiveTime >= CODEX_INACTIVE_THRESHOLD_MS) {
+                log(`Codex session "${session.name}" marked offline (inactive for ${Math.round(inactiveTime / 60000)} min)`);
+                session.status = 'offline';
+                session.currentTool = undefined;
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        broadcastSessions();
+        saveSessions();
+    }
+}
+/** Auto-cleanup sessions that have been offline for too long */
+function cleanupStaleOfflineSessions() {
+    const now = Date.now();
+    const toDelete = [];
+    for (const session of managedSessions.values()) {
+        if (session.status === 'offline') {
+            const offlineTime = now - session.lastActivity;
+            if (offlineTime >= OFFLINE_CLEANUP_MS) {
+                log(`Auto-cleaning stale session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
+                toDelete.push(session.id);
+            }
+        }
+    }
+    // Delete sessions (async, but we don't need to wait)
+    for (const id of toDelete) {
+        deleteSession(id);
+    }
+}
 function saveSessions() {
     try {
         const data = {
@@ -928,6 +976,10 @@ function loadSessions() {
                 // Migrate old sessions: if they have tmuxSession, they're internal
                 if (!session.type) {
                     session.type = session.tmuxSession ? 'internal' : 'external';
+                }
+                // Migrate old sessions: default agent to 'claude' if not set
+                if (!session.agent) {
+                    session.agent = session.codexThreadId ? 'codex' : 'claude';
                 }
                 managedSessions.set(session.id, session);
                 if (session.cwd) {
@@ -1141,6 +1193,7 @@ function findOrCreateExternalSession(claudeSessionId, eventCwd, terminalInfo) {
         id,
         name: dirName,
         type: 'external',
+        agent: 'claude',
         // No tmuxSession for external sessions
         status: 'working',
         createdAt: Date.now(),
@@ -1157,6 +1210,92 @@ function findOrCreateExternalSession(claudeSessionId, eventCwd, terminalInfo) {
     broadcastSessions();
     saveSessions();
     return session;
+}
+// =============================================================================
+// Codex Session Management
+// =============================================================================
+/** Map of Codex thread IDs to managed session IDs */
+const codexToManagedMap = new Map();
+/**
+ * Find existing session or auto-create a session for Codex threads.
+ */
+function findOrCreateCodexSession(codexThreadId, eventCwd, name) {
+    // First try lookup by Codex thread ID
+    const existingId = codexToManagedMap.get(codexThreadId);
+    if (existingId) {
+        const existing = managedSessions.get(existingId);
+        if (existing)
+            return existing;
+    }
+    // Check if there's a session with matching thread ID
+    for (const session of managedSessions.values()) {
+        if (session.codexThreadId === codexThreadId) {
+            codexToManagedMap.set(codexThreadId, session.id);
+            return session;
+        }
+    }
+    // Auto-create external session for this Codex thread
+    const id = randomUUID();
+    const dirName = eventCwd.split('/').pop() || 'Codex';
+    const sessionName = name || dirName;
+    const session = {
+        id,
+        name: sessionName,
+        type: 'external',
+        agent: 'codex',
+        status: 'working',
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        cwd: eventCwd,
+        codexThreadId,
+        // No zonePosition - sessions are unplaced initially
+    };
+    managedSessions.set(id, session);
+    codexToManagedMap.set(codexThreadId, id);
+    log(`Auto-created Codex session: ${session.name} (Thread: ${codexThreadId.slice(0, 8)})`);
+    broadcastSessions();
+    saveSessions();
+    return session;
+}
+/**
+ * Initialize the Codex session watcher
+ */
+function initCodexWatcher() {
+    const codexWatcher = getCodexWatcher({ debug: DEBUG });
+    codexWatcher.on('event', (event) => {
+        // Find or create session for this event
+        const session = findOrCreateCodexSession(event.sessionId, // This is the Codex thread ID
+        event.cwd);
+        // IMPORTANT: Update event's sessionId to match the managed session's ID
+        // so the frontend can properly filter events by session
+        event.sessionId = session.id;
+        // Update session state based on event
+        if (event.type === 'stop') {
+            session.status = 'idle';
+            session.currentTool = undefined;
+        }
+        else if (event.type === 'pre_tool_use') {
+            session.status = 'working';
+            session.currentTool = event.tool;
+        }
+        else if (event.type === 'post_tool_use') {
+            session.currentTool = event.tool;
+        }
+        session.lastActivity = Date.now();
+        // Add to events and broadcast
+        events.push(event);
+        if (events.length > MAX_EVENTS) {
+            events.shift();
+        }
+        broadcast({ type: 'event', payload: event });
+        broadcastSessions();
+        saveSessions();
+    });
+    codexWatcher.on('session:new', (info) => {
+        log(`New Codex session detected: ${info.name} (${info.threadId.slice(0, 8)})`);
+        findOrCreateCodexSession(info.threadId, info.cwd, info.name);
+    });
+    codexWatcher.start();
 }
 // =============================================================================
 // Event Processing
@@ -1357,7 +1496,13 @@ const MIME_TYPES = {
     '.ico': 'image/x-icon',
 };
 function serveStaticFile(req, res) {
-    const distDir = resolve(dirname(new URL(import.meta.url).pathname), '../..');
+    // In dev mode (tsx watch), we're in src/server, so go up 2 levels then into dist
+    // In production (dist/server), go up 1 level to dist
+    const serverDir = dirname(new URL(import.meta.url).pathname);
+    const isDevMode = serverDir.includes('/src/');
+    const distDir = isDevMode
+        ? resolve(serverDir, '../../dist')
+        : resolve(serverDir, '..');
     let urlPath = req.url?.split('?')[0] ?? '/';
     if (urlPath === '/')
         urlPath = '/index.html';
@@ -1498,6 +1643,37 @@ async function handleHttpRequest(req, res) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: e.message }));
         }
+        return;
+    }
+    // DELETE /sessions/cleanup - Remove offline sessions
+    const cleanupMatch = req.url?.match(/^\/sessions\/cleanup(\?.*)?$/);
+    if (req.method === 'DELETE' && cleanupMatch) {
+        const urlParams = new URLSearchParams(cleanupMatch[1] || '');
+        const maxAgeMs = parseInt(urlParams.get('maxAge') || '0', 10);
+        const now = Date.now();
+        const toDelete = [];
+        for (const session of managedSessions.values()) {
+            if (session.status === 'offline') {
+                if (maxAgeMs > 0) {
+                    // Only delete if offline longer than maxAge
+                    const offlineTime = now - session.lastActivity;
+                    if (offlineTime >= maxAgeMs) {
+                        toDelete.push(session.id);
+                    }
+                }
+                else {
+                    // Delete all offline sessions
+                    toDelete.push(session.id);
+                }
+            }
+        }
+        // Delete sessions
+        for (const id of toDelete) {
+            await deleteSession(id);
+        }
+        log(`Cleaned up ${toDelete.length} offline sessions`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, deleted: toDelete.length }));
         return;
     }
     // Session-specific endpoints: /sessions/:id
@@ -1792,6 +1968,8 @@ function main() {
         }
     });
     gitStatusManager.start();
+    // Initialize Codex session watcher (watches ~/.codex/sessions/)
+    initCodexWatcher();
     watchEventsFile();
     const httpServer = createServer((req, res) => {
         handleHttpRequest(req, res).catch((e) => {
@@ -1863,7 +2041,11 @@ function main() {
         startRalphWiggumPolling();
         setInterval(checkSessionHealth, 5000);
         setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS);
+        setInterval(checkCodexSessionHealth, 30_000); // Check every 30 seconds
+        setInterval(cleanupStaleOfflineSessions, 60_000); // Check every minute
         checkSessionHealth();
+        checkCodexSessionHealth(); // Mark inactive Codex sessions as offline
+        cleanupStaleOfflineSessions(); // Run once at startup
     });
 }
 main();

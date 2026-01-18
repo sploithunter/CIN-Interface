@@ -16,10 +16,51 @@ import { join, resolve, basename, dirname } from 'path';
 import { EventEmitter } from 'events';
 import type {
   VibecraftEvent,
-  CodexRawEvent,
-  CodexItem,
   ManagedSession,
 } from '../shared/types.js';
+
+// Actual Codex session log format (different from --json output)
+interface CodexSessionLogEvent {
+  timestamp: string;
+  type: 'session_meta' | 'response_item' | 'event_msg' | 'turn_context';
+  payload: CodexPayload;
+}
+
+type CodexPayload =
+  | CodexSessionMeta
+  | CodexResponseItem
+  | CodexEventMsg
+  | CodexTurnContext;
+
+interface CodexSessionMeta {
+  id: string;
+  cwd: string;
+  cli_version: string;
+  model_provider?: string;
+}
+
+interface CodexResponseItem {
+  type: 'function_call' | 'function_call_output' | 'message' | 'reasoning';
+  // For function_call
+  name?: string;
+  arguments?: string;
+  call_id?: string;
+  // For function_call_output
+  output?: string;
+  // For message
+  role?: string;
+  content?: Array<{ type: string; text?: string }>;
+}
+
+interface CodexEventMsg {
+  type: 'user_message' | 'agent_reasoning' | 'token_count' | 'turn_end';
+  message?: string;
+  text?: string;
+}
+
+interface CodexTurnContext {
+  turn_id?: string;
+}
 
 // Codex home directory (can be overridden via env)
 const CODEX_HOME = process.env.CODEX_HOME || join(process.env.HOME || '', '.codex');
@@ -60,9 +101,8 @@ export class CodexSessionWatcher extends EventEmitter {
   }
 
   private debugLog(message: string): void {
-    if (this.debug) {
-      console.log(`[CodexWatcher:debug] ${message}`);
-    }
+    // Always log for now to debug
+    console.log(`[CodexWatcher:debug] ${message}`);
   }
 
   /**
@@ -109,33 +149,41 @@ export class CodexSessionWatcher extends EventEmitter {
     this.log('Stopped watching Codex sessions');
   }
 
+  // Only track session files modified within the last 24 hours
+  private static readonly MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000;
+
   /**
-   * Scan for existing session files
+   * Scan for existing session files (only recent ones)
    */
   private scanForSessions(): void {
     try {
-      // Codex organizes sessions by date: sessions/YYYY/MM/DD/
-      const years = this.listDirs(CODEX_SESSIONS_DIR);
+      // Only scan today's and yesterday's directories for efficiency
+      const now = new Date();
+      const today = this.formatDatePath(now);
+      const yesterday = this.formatDatePath(new Date(now.getTime() - 24 * 60 * 60 * 1000));
 
-      for (const year of years) {
-        const yearPath = join(CODEX_SESSIONS_DIR, year);
-        const months = this.listDirs(yearPath);
+      const pathsToScan = [today, yesterday]
+        .map(datePath => join(CODEX_SESSIONS_DIR, datePath))
+        .filter(p => existsSync(p));
 
-        for (const month of months) {
-          const monthPath = join(yearPath, month);
-          const days = this.listDirs(monthPath);
-
-          for (const day of days) {
-            const dayPath = join(monthPath, day);
-            this.scanDayDirectory(dayPath);
-          }
-        }
+      for (const dayPath of pathsToScan) {
+        this.scanDayDirectory(dayPath);
       }
 
-      this.log(`Found ${this.trackedFiles.size} Codex session files`);
+      this.log(`Found ${this.trackedFiles.size} recent Codex session files`);
     } catch (e) {
       this.log(`Error scanning sessions: ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * Format a date as YYYY/MM/DD path
+   */
+  private formatDatePath(date: Date): string {
+    const year = date.getFullYear().toString();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return join(year, month, day);
   }
 
   /**
@@ -237,6 +285,7 @@ export class CodexSessionWatcher extends EventEmitter {
         const stat = statSync(tracked.path);
 
         if (stat.mtimeMs > tracked.lastModified) {
+          this.debugLog(`File changed: ${basename(tracked.path)} (${stat.mtimeMs} > ${tracked.lastModified})`);
           tracked.lastModified = stat.mtimeMs;
           this.readNewContent(tracked, false);
         }
@@ -264,23 +313,21 @@ export class CodexSessionWatcher extends EventEmitter {
         if (!line.trim()) continue;
 
         try {
-          const rawEvent = JSON.parse(line) as CodexRawEvent;
+          const rawEvent = JSON.parse(line) as CodexSessionLogEvent;
 
-          // Extract CWD from first event if available
-          if (!tracked.cwd && rawEvent.item?.text) {
-            // Try to extract cwd from environment_context in first message
-            const cwdMatch = rawEvent.item.text.match(/cwd:\s*([^\n]+)/);
-            if (cwdMatch) {
-              tracked.cwd = cwdMatch[1].trim();
+          // Extract CWD from session_meta
+          if (rawEvent.type === 'session_meta') {
+            const meta = rawEvent.payload as CodexSessionMeta;
+            if (meta.cwd) {
+              tracked.cwd = meta.cwd;
             }
           }
 
           // Extract first user message for session naming
-          if (!tracked.firstUserMessage && rawEvent.item?.type === 'agent_message') {
-            // Skip system messages
-            const text = rawEvent.item.text || '';
-            if (!text.includes('<environment_context>') && !text.includes('<INSTRUCTIONS>')) {
-              tracked.firstUserMessage = text.slice(0, 100);
+          if (!tracked.firstUserMessage && rawEvent.type === 'event_msg') {
+            const msg = rawEvent.payload as CodexEventMsg;
+            if (msg.type === 'user_message' && msg.message) {
+              tracked.firstUserMessage = msg.message.slice(0, 100);
             }
           }
 
@@ -288,6 +335,7 @@ export class CodexSessionWatcher extends EventEmitter {
           if (!isInitialRead) {
             const mappedEvent = this.mapCodexEvent(rawEvent, tracked);
             if (mappedEvent) {
+              this.debugLog(`Emitting event: ${mappedEvent.type}`);
               this.emit('event', mappedEvent);
             }
           }
@@ -301,58 +349,56 @@ export class CodexSessionWatcher extends EventEmitter {
   }
 
   /**
-   * Map a Codex event to CIN-Interface format
+   * Map a Codex session log event to CIN-Interface format
+   * Handles the actual session log format (session_meta, response_item, event_msg, turn_context)
    */
-  private mapCodexEvent(raw: CodexRawEvent, tracked: TrackedFile): VibecraftEvent | null {
+  private mapCodexEvent(raw: CodexSessionLogEvent, tracked: TrackedFile): VibecraftEvent | null {
     const base = {
       id: `codex-${tracked.threadId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      timestamp: Date.now(),
+      timestamp: new Date(raw.timestamp).getTime(),
       sessionId: tracked.threadId,
       cwd: tracked.cwd || process.cwd(),
       agent: 'codex' as const,
     };
 
     switch (raw.type) {
-      case 'thread.started':
+      case 'session_meta': {
+        const meta = raw.payload as CodexSessionMeta;
         return {
           ...base,
           type: 'session_start',
-          source: 'codex-cli',
+          source: `codex-cli v${meta.cli_version}`,
         };
+      }
 
-      case 'turn.started':
-        return {
-          ...base,
-          type: 'user_prompt_submit',
-          prompt: '[Turn started]',
-        };
+      case 'event_msg': {
+        const msg = raw.payload as CodexEventMsg;
+        if (msg.type === 'user_message' && msg.message) {
+          return {
+            ...base,
+            type: 'user_prompt_submit',
+            prompt: msg.message,
+          };
+        }
+        if (msg.type === 'turn_end') {
+          return {
+            ...base,
+            type: 'stop',
+            stopHookActive: false,
+          };
+        }
+        // agent_reasoning, token_count - skip
+        return null;
+      }
 
-      case 'turn.completed':
-        return {
-          ...base,
-          type: 'stop',
-          stopHookActive: false,
-          response: raw.item?.text,
-        };
+      case 'response_item': {
+        const item = raw.payload as CodexResponseItem;
+        return this.mapResponseItem(item, base);
+      }
 
-      case 'turn.failed':
-        return {
-          ...base,
-          type: 'stop',
-          stopHookActive: false,
-          response: raw.error?.message || 'Turn failed',
-        };
-
-      case 'item.completed':
-        return this.mapItemEvent(raw.item, base);
-
-      case 'error':
-        return {
-          ...base,
-          type: 'notification',
-          message: raw.error?.message || 'Unknown error',
-          notificationType: 'error',
-        };
+      case 'turn_context':
+        // Skip turn context events
+        return null;
 
       default:
         return null;
@@ -360,82 +406,96 @@ export class CodexSessionWatcher extends EventEmitter {
   }
 
   /**
-   * Map a Codex item event to CIN-Interface format
+   * Map a Codex response_item to CIN-Interface format
    */
-  private mapItemEvent(
-    item: CodexItem | undefined,
-    base: Omit<VibecraftEvent, 'type'>
+  private mapResponseItem(
+    item: CodexResponseItem,
+    base: { id: string; timestamp: number; sessionId: string; cwd: string; agent: 'codex' }
   ): VibecraftEvent | null {
-    if (!item) return null;
-
     switch (item.type) {
-      case 'command_execution':
+      case 'function_call': {
+        // Map Codex function names to CIN-Interface tool names
+        const toolName = this.mapToolName(item.name || 'unknown');
+        let toolInput: Record<string, unknown> = {};
+
+        try {
+          if (item.arguments) {
+            toolInput = JSON.parse(item.arguments);
+          }
+        } catch {
+          toolInput = { raw: item.arguments };
+        }
+
+        return {
+          ...base,
+          type: 'pre_tool_use',
+          tool: toolName,
+          toolInput,
+          toolUseId: item.call_id || base.id,
+        };
+      }
+
+      case 'function_call_output': {
+        // Parse output to extract useful info
+        const output = item.output || '';
+        const exitCodeMatch = output.match(/Exit code: (\d+)/);
+        const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1], 10) : 0;
+
         return {
           ...base,
           type: 'post_tool_use',
-          tool: 'Bash',
-          toolInput: { command: item.command || '' },
-          toolResponse: { stdout: item.output || '', exit_code: item.exit_code },
-          toolUseId: item.id,
-          success: item.exit_code === 0,
+          tool: 'Bash', // We might not know the tool here, default to Bash
+          toolInput: {},
+          toolResponse: { output, exit_code: exitCode },
+          toolUseId: item.call_id || base.id,
+          success: exitCode === 0,
         };
+      }
 
-      case 'file_change':
-        const tool = item.operation === 'create' ? 'Write' : 'Edit';
-        return {
-          ...base,
-          type: 'post_tool_use',
-          tool,
-          toolInput: { file_path: item.file_path },
-          toolResponse: { operation: item.operation },
-          toolUseId: item.id,
-          success: true,
-        };
+      case 'message': {
+        // Assistant messages - could be the final response
+        if (item.role === 'assistant' && item.content) {
+          const text = item.content
+            .filter(c => c.type === 'output_text' || c.type === 'text')
+            .map(c => c.text || '')
+            .join('\n');
 
-      case 'web_search':
-        return {
-          ...base,
-          type: 'post_tool_use',
-          tool: 'WebSearch',
-          toolInput: { query: item.query },
-          toolResponse: {},
-          toolUseId: item.id,
-          success: true,
-        };
-
-      case 'mcp_tool_call':
-        return {
-          ...base,
-          type: 'post_tool_use',
-          tool: item.tool_name || 'MCP',
-          toolInput: item.tool_input || {},
-          toolResponse: {},
-          toolUseId: item.id,
-          success: true,
-        };
-
-      case 'agent_message':
-        // Skip agent messages as separate events (they come with turn.completed)
+          if (text) {
+            return {
+              ...base,
+              type: 'stop',
+              stopHookActive: false,
+              response: text,
+            };
+          }
+        }
         return null;
+      }
 
       case 'reasoning':
-        // Could emit as a special event type if desired
+        // Skip reasoning events
         return null;
-
-      case 'plan_update':
-        return {
-          ...base,
-          type: 'post_tool_use',
-          tool: 'TodoWrite',
-          toolInput: { plan: item.text },
-          toolResponse: {},
-          toolUseId: item.id,
-          success: true,
-        };
 
       default:
         return null;
     }
+  }
+
+  /**
+   * Map Codex tool/function names to CIN-Interface tool names
+   */
+  private mapToolName(codexName: string): string {
+    const mapping: Record<string, string> = {
+      'shell_command': 'Bash',
+      'shell': 'Bash',
+      'read_file': 'Read',
+      'write_file': 'Write',
+      'edit_file': 'Edit',
+      'list_directory': 'Glob',
+      'search_files': 'Grep',
+      'web_search': 'WebSearch',
+    };
+    return mapping[codexName] || codexName;
   }
 
   /**

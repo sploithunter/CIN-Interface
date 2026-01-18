@@ -54,14 +54,18 @@
 - [ ] File explorer for current repo (view/navigate edited files)
 
 ### Agent Integrations
-- [ ] OpenAI Codex CLI integration (first non-Claude agent) - See [CODEX_INTEGRATION.md](docs/CODEX_INTEGRATION.md)
+- [x] OpenAI Codex CLI integration Phase 1 (first non-Claude agent) - See [CODEX_INTEGRATION.md](docs/CODEX_INTEGRATION.md)
   - [x] Research Codex CLI hook system / event format
   - [x] Create integration spec document
-  - [x] Phase 1: CodexSessionWatcher (watch ~/.codex/sessions/ JSONL files)
-  - [x] Phase 1: Event mapper (Codex events → CIN-Interface format)
-  - [x] Phase 1: Add agent type field to sessions and UI
-  - [ ] Phase 2: Codex notify hook for real-time events
-  - [ ] Phase 3: SDK integration for internal Codex sessions
+  - [x] CodexSessionWatcher (watch ~/.codex/sessions/ JSONL files)
+  - [x] Event mapper (Codex events → CIN-Interface format)
+  - [x] Add agent type field to sessions and UI
+  - [x] Session naming from cwd (with startup reconciliation)
+  - [x] Session health checks (mark offline after 5 min inactivity)
+  - [x] Persist codexToManagedMap for session ID stability
+  - Note: Old events from before fix may not display; new events work correctly
+- [ ] Codex CLI Phase 2: Notify hook for real-time events
+- [ ] Codex CLI Phase 3: SDK integration for internal Codex sessions
 
 ### Low Priority / Future
 - [ ] Text labels on hex grid (partially implemented)
@@ -112,3 +116,9 @@
   - Event mapper translates Codex events to CIN-Interface format
   - Added agent type field to sessions (claude/codex)
   - UI shows green "codex" badge and border for Codex sessions
+  - Fixed event sessionId to use managed session UUID (enables activity feed filtering)
+  - Only track recent session files (today + yesterday) to avoid stale sessions
+  - Session naming from cwd with startup reconciliation
+  - Codex session health checks (offline after 5 min inactivity)
+  - Persist codexToManagedMap for session ID stability across restarts
+  - Frontend fallback matching by cwd for Codex events
