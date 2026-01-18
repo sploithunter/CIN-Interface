@@ -30,6 +30,7 @@ import { createClient, LiveTranscriptionEvents, LiveClient } from '@deepgram/sdk
 import { DEFAULTS } from '../shared/defaults.js';
 import { GitStatusManager } from './GitStatusManager.js';
 import { ProjectsManager } from './ProjectsManager.js';
+import { CodexSessionWatcher, getCodexWatcher } from './CodexSessionWatcher.js';
 import { fileURLToPath } from 'url';
 import type {
   VibecraftEvent,
@@ -45,6 +46,7 @@ import type {
   ZonePosition,
   WSMessage,
   TerminalInfo,
+  AgentType,
 } from '../shared/types.js';
 
 // =============================================================================
@@ -832,6 +834,7 @@ function createSession(options: CreateSessionOptions = {}): Promise<ManagedSessi
               id,
               name,
               type: 'internal',
+              agent: 'claude',
               tmuxSession,
               status: 'idle',
               createdAt: Date.now(),
@@ -1136,6 +1139,11 @@ function loadSessions(): void {
           session.type = session.tmuxSession ? 'internal' : 'external';
         }
 
+        // Migrate old sessions: default agent to 'claude' if not set
+        if (!session.agent) {
+          session.agent = session.codexThreadId ? 'codex' : 'claude';
+        }
+
         managedSessions.set(session.id, session);
         if (session.cwd) {
           gitStatusManager.track(session.id, session.cwd);
@@ -1379,6 +1387,7 @@ function findOrCreateExternalSession(claudeSessionId: string, eventCwd: string, 
     id,
     name: dirName,
     type: 'external',
+    agent: 'claude',
     // No tmuxSession for external sessions
     status: 'working',
     createdAt: Date.now(),
@@ -1398,6 +1407,102 @@ function findOrCreateExternalSession(claudeSessionId: string, eventCwd: string, 
   saveSessions();
 
   return session;
+}
+
+// =============================================================================
+// Codex Session Management
+// =============================================================================
+
+/** Map of Codex thread IDs to managed session IDs */
+const codexToManagedMap = new Map<string, string>();
+
+/**
+ * Find existing session or auto-create a session for Codex threads.
+ */
+function findOrCreateCodexSession(codexThreadId: string, eventCwd: string, name?: string): ManagedSession {
+  // First try lookup by Codex thread ID
+  const existingId = codexToManagedMap.get(codexThreadId);
+  if (existingId) {
+    const existing = managedSessions.get(existingId);
+    if (existing) return existing;
+  }
+
+  // Check if there's a session with matching thread ID
+  for (const session of managedSessions.values()) {
+    if (session.codexThreadId === codexThreadId) {
+      codexToManagedMap.set(codexThreadId, session.id);
+      return session;
+    }
+  }
+
+  // Auto-create external session for this Codex thread
+  const id = randomUUID();
+  const dirName = eventCwd.split('/').pop() || 'Codex';
+  const sessionName = name || dirName;
+
+  const session: ManagedSession = {
+    id,
+    name: sessionName,
+    type: 'external',
+    agent: 'codex',
+    status: 'working',
+    createdAt: Date.now(),
+    lastActivity: Date.now(),
+    cwd: eventCwd,
+    codexThreadId,
+    // No zonePosition - sessions are unplaced initially
+  };
+
+  managedSessions.set(id, session);
+  codexToManagedMap.set(codexThreadId, id);
+
+  log(`Auto-created Codex session: ${session.name} (Thread: ${codexThreadId.slice(0, 8)})`);
+  broadcastSessions();
+  saveSessions();
+
+  return session;
+}
+
+/**
+ * Initialize the Codex session watcher
+ */
+function initCodexWatcher(): void {
+  const codexWatcher = getCodexWatcher({ debug: DEBUG });
+
+  codexWatcher.on('event', (event: VibecraftEvent) => {
+    // Find or create session for this event
+    const session = findOrCreateCodexSession(
+      event.sessionId,
+      event.cwd,
+    );
+
+    // Update session state based on event
+    if (event.type === 'stop') {
+      session.status = 'idle';
+      session.currentTool = undefined;
+    } else if (event.type === 'post_tool_use') {
+      session.status = 'working';
+      session.currentTool = (event as PostToolUseEvent).tool;
+    }
+    session.lastActivity = Date.now();
+
+    // Add to events and broadcast
+    events.push(event);
+    if (events.length > MAX_EVENTS) {
+      events.shift();
+    }
+
+    broadcast({ type: 'event', payload: event });
+    broadcastSessions();
+    saveSessions();
+  });
+
+  codexWatcher.on('session:new', (info: { threadId: string; cwd: string; name: string }) => {
+    log(`New Codex session detected: ${info.name} (${info.threadId.slice(0, 8)})`);
+    findOrCreateCodexSession(info.threadId, info.cwd, info.name);
+  });
+
+  codexWatcher.start();
 }
 
 // =============================================================================
@@ -2160,6 +2265,9 @@ function main(): void {
     }
   });
   gitStatusManager.start();
+
+  // Initialize Codex session watcher (watches ~/.codex/sessions/)
+  initCodexWatcher();
 
   watchEventsFile();
 

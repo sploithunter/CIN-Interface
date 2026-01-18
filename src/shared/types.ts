@@ -55,6 +55,7 @@ export interface BaseEvent {
   type: EventType;
   sessionId: string;
   cwd: string;
+  agent?: AgentType;  // Which agent produced this event (defaults to 'claude' for backward compatibility)
 }
 
 /** Pre-tool-use event */
@@ -148,6 +149,7 @@ export type VibecraftEvent =
 
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline';
 export type SessionType = 'internal' | 'external';
+export type AgentType = 'claude' | 'codex';
 
 export interface ZonePosition {
   q: number;
@@ -158,12 +160,14 @@ export interface ManagedSession {
   id: string;
   name: string;
   type: SessionType;              // 'internal' = created via New Zone (tmux), 'external' = detected from hooks
+  agent: AgentType;               // 'claude' or 'codex' - which AI agent is running
   tmuxSession?: string;           // Only for internal sessions
   status: SessionStatus;
   createdAt: number;
   lastActivity: number;
   cwd: string;
-  claudeSessionId?: string;
+  claudeSessionId?: string;       // Claude session ID (for Claude agent)
+  codexThreadId?: string;         // Codex thread ID (for Codex agent)
   currentTool?: string;
   zonePosition?: ZonePosition;    // If undefined, session is "unplaced" (not on 3D grid)
   suggestion?: string;            // Claude's suggested next prompt (shown in gray at input line)
@@ -303,3 +307,63 @@ export const DEFAULT_CONFIG = {
   maxEventsInMemory: 1000,
   debug: false,
 };
+
+// =============================================================================
+// Codex-Specific Types
+// =============================================================================
+
+/** Codex event types from --json output */
+export type CodexEventType =
+  | 'thread.started'
+  | 'turn.started'
+  | 'turn.completed'
+  | 'turn.failed'
+  | 'item.started'
+  | 'item.completed'
+  | 'error';
+
+/** Codex item types */
+export type CodexItemType =
+  | 'agent_message'
+  | 'command_execution'
+  | 'file_change'
+  | 'mcp_tool_call'
+  | 'web_search'
+  | 'plan_update'
+  | 'reasoning';
+
+/** Codex token usage */
+export interface CodexUsage {
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+}
+
+/** Codex item structure */
+export interface CodexItem {
+  id: string;
+  type: CodexItemType;
+  status?: string;
+  text?: string;
+  command?: string;
+  output?: string;
+  exit_code?: number;
+  file_path?: string;
+  operation?: string;  // 'create' | 'modify' | 'delete'
+  query?: string;      // for web_search
+  tool_name?: string;  // for mcp_tool_call
+  tool_input?: Record<string, unknown>;
+}
+
+/** Raw Codex event from JSONL */
+export interface CodexRawEvent {
+  type: CodexEventType;
+  thread_id?: string;
+  turn_id?: string;
+  item?: CodexItem;
+  usage?: CodexUsage;
+  error?: {
+    message: string;
+    code?: string;
+  };
+}

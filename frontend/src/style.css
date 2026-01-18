@@ -432,6 +432,32 @@ kbd {
   opacity: 0.8;
 }
 
+/* Agent type tag (for Codex sessions) */
+.session-agent-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+
+.session-agent-tag.codex {
+  background: rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+/* Codex session card styling */
+.session-card.codex {
+  border-left: 3px solid #10b981;
+}
+
+.session-card.codex.selected {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: #10b981;
+  border-left: 3px solid #10b981;
+}
+
 /* Session card action buttons */
 .session-card-actions {
   display: flex;

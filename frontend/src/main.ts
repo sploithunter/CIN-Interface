@@ -195,12 +195,14 @@ function renderSessions() {
   managedSessionsEl.innerHTML = sortedSessions.map((session, index) => {
     const isExternal = session.type === 'external';
     const isUnplaced = !session.zonePosition;
+    const isCodex = session.agent === 'codex';
     const classes = [
       'session-card',
       session.status,
       selectedSessionId === session.id ? 'selected' : '',
       isExternal ? 'external' : '',
-      isUnplaced ? 'unplaced' : ''
+      isUnplaced ? 'unplaced' : '',
+      isCodex ? 'codex' : ''
     ].filter(Boolean).join(' ');
 
     const canRestart = session.type === 'internal' && session.status === 'offline';
@@ -271,25 +273,27 @@ function renderSessions() {
 }
 
 function getSessionStatusText(session: ManagedSession, isExternal: boolean = false, isUnplaced: boolean = false): string {
-  // Build type prefix for external/unplaced
-  const typePrefix = isExternal ? '<span class="session-type-tag">ext</span> ' : '';
+  // Build type prefix for external/agent type
+  const isCodex = session.agent === 'codex';
+  const agentTag = isCodex ? '<span class="session-agent-tag codex">codex</span> ' : '';
+  const typePrefix = isExternal && !isCodex ? '<span class="session-type-tag">ext</span> ' : '';
   const unplacedSuffix = isUnplaced ? ' <span class="session-unplaced-tag">⊕</span>' : '';
 
   if (session.status === 'waiting') {
-    return `${typePrefix}<span class="needs-attention">⚡ Needs attention</span>${unplacedSuffix}`;
+    return `${agentTag}${typePrefix}<span class="needs-attention">⚡ Needs attention</span>${unplacedSuffix}`;
   }
   if (session.currentTool) {
-    return `${typePrefix}<span class="session-tool">${escapeHtml(session.currentTool)}</span>${unplacedSuffix}`;
+    return `${agentTag}${typePrefix}<span class="session-tool">${escapeHtml(session.currentTool)}</span>${unplacedSuffix}`;
   }
   if (session.status === 'working') {
-    return `${typePrefix}Working...${unplacedSuffix}`;
+    return `${agentTag}${typePrefix}Working...${unplacedSuffix}`;
   }
   if (session.status === 'offline') {
-    return `${typePrefix}Offline${unplacedSuffix}`;
+    return `${agentTag}${typePrefix}Offline${unplacedSuffix}`;
   }
   // Extract folder name from cwd for display
   const folder = session.cwd?.split('/').pop() || 'Idle';
-  return `${typePrefix}${folder}${unplacedSuffix}`;
+  return `${agentTag}${typePrefix}${folder}${unplacedSuffix}`;
 }
 
 function selectSession(sessionId: string | null) {

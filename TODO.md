@@ -57,9 +57,9 @@
 - [ ] OpenAI Codex CLI integration (first non-Claude agent) - See [CODEX_INTEGRATION.md](docs/CODEX_INTEGRATION.md)
   - [x] Research Codex CLI hook system / event format
   - [x] Create integration spec document
-  - [ ] Phase 1: CodexSessionWatcher (watch ~/.codex/sessions/ JSONL files)
-  - [ ] Phase 1: Event mapper (Codex events → CIN-Interface format)
-  - [ ] Phase 1: Add agent type field to sessions and UI
+  - [x] Phase 1: CodexSessionWatcher (watch ~/.codex/sessions/ JSONL files)
+  - [x] Phase 1: Event mapper (Codex events → CIN-Interface format)
+  - [x] Phase 1: Add agent type field to sessions and UI
   - [ ] Phase 2: Codex notify hook for real-time events
   - [ ] Phase 3: SDK integration for internal Codex sessions
 
@@ -107,3 +107,8 @@
 - Added DELETE /sessions/cleanup endpoint to remove all offline sessions
 - Added auto-cleanup for sessions offline > 1 hour (runs every minute)
 - Added expand/collapse for Bash output in activity feed (shows command + truncated output)
+- Implemented Codex CLI integration Phase 1:
+  - CodexSessionWatcher watches ~/.codex/sessions/ for JSONL files
+  - Event mapper translates Codex events to CIN-Interface format
+  - Added agent type field to sessions (claude/codex)
+  - UI shows green "codex" badge and border for Codex sessions

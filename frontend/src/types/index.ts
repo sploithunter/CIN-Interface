@@ -1,6 +1,7 @@
 // Session types
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline';
 export type SessionType = 'internal' | 'external';
+export type AgentType = 'claude' | 'codex';
 
 export interface GitStatus {
   branch: string;
@@ -27,12 +28,14 @@ export interface ManagedSession {
   id: string;
   name: string;
   type: SessionType;              // 'internal' = created via New Zone (tmux), 'external' = detected from hooks
+  agent?: AgentType;              // 'claude' or 'codex' - which AI agent (defaults to 'claude')
   tmuxSession?: string;           // Only for internal sessions
   status: SessionStatus;
   createdAt: number;
   lastActivity: number;
   cwd?: string;
   claudeSessionId?: string;
+  codexThreadId?: string;         // Codex thread ID (for Codex agent)
   currentTool?: string;
   zonePosition?: ZonePosition;    // If undefined, session is "unplaced" (not on 3D grid)
   gitStatus?: GitStatus;
