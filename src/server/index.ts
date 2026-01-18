@@ -1079,7 +1079,7 @@ function checkWorkingTimeout(): void {
 }
 
 /** How long without activity before marking Codex sessions offline */
-const CODEX_INACTIVE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const CODEX_INACTIVE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
 /**
  * Check Codex session health based on activity time
@@ -1108,6 +1108,9 @@ function checkCodexSessionHealth(): void {
   }
 }
 
+/** Cleanup time for Codex sessions (shorter since they have no persistent process) */
+const CODEX_CLEANUP_MS = 5 * 60 * 1000; // 5 minutes
+
 /** Auto-cleanup sessions that have been offline for too long */
 function cleanupStaleOfflineSessions(): void {
   const now = Date.now();
@@ -1116,8 +1119,12 @@ function cleanupStaleOfflineSessions(): void {
   for (const session of managedSessions.values()) {
     if (session.status === 'offline') {
       const offlineTime = now - session.lastActivity;
-      if (offlineTime >= OFFLINE_CLEANUP_MS) {
-        log(`Auto-cleaning stale session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
+
+      // Codex sessions clean up faster (10 min) since they have no persistent process
+      const threshold = session.agent === 'codex' ? CODEX_CLEANUP_MS : OFFLINE_CLEANUP_MS;
+
+      if (offlineTime >= threshold) {
+        log(`Auto-cleaning stale ${session.agent || 'claude'} session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
         toDelete.push(session.id);
       }
     }

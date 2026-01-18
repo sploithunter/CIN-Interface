@@ -64,6 +64,7 @@
   - [x] Session health checks (mark offline after 5 min inactivity)
   - [x] Persist codexToManagedMap for session ID stability
   - Note: Old events from before fix may not display; new events work correctly
+- [x] Auto-remove terminated Codex sessions (2 min to offline, 5 min to delete)
 - [ ] Codex CLI Phase 2: Notify hook for real-time events
 - [ ] Codex CLI Phase 3: SDK integration for internal Codex sessions
 
