@@ -1119,37 +1119,35 @@ function checkCodexSessionHealth(): void {
   }
 }
 
-/** Cleanup time for Codex sessions - same as Claude since user may return to idle sessions */
-const CODEX_CLEANUP_MS = 60 * 60 * 1000; // 1 hour (same as Claude)
-
-/** Auto-cleanup sessions that have been offline for too long */
+/**
+ * Auto-cleanup ONLY internal sessions whose tmux process is gone (e.g., after reboot).
+ * External sessions (Claude and Codex) are NEVER auto-deleted to preserve event matching.
+ * Users can manually delete sessions they don't want.
+ */
 function cleanupStaleOfflineSessions(): void {
   const now = Date.now();
   const toDelete: string[] = [];
 
-  // First, get list of active tmux sessions for safety check
+  // Get list of active tmux sessions
   exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
     const activeTmuxSessions = error ? new Set<string>() : new Set(stdout.trim().split('\n').filter(Boolean));
 
     for (const session of managedSessions.values()) {
-      if (session.status === 'offline') {
-        const offlineTime = now - session.lastActivity;
+      // Only auto-cleanup INTERNAL sessions - never external (preserves event mapping)
+      if (session.type !== 'internal') {
+        continue;
+      }
 
-        // SAFETY: For internal sessions, only cleanup if tmux session is truly gone
-        // This protects against deleting sessions with active processes
-        if (session.type === 'internal' && session.tmuxSession) {
-          if (activeTmuxSessions.has(session.tmuxSession)) {
-            // Tmux session still exists - don't cleanup, something is wrong with our state
-            continue;
-          }
-          // Tmux session is gone (e.g., after reboot) - safe to cleanup after threshold
+      if (session.status === 'offline' && session.tmuxSession) {
+        // If tmux session still exists, don't cleanup (something wrong with our state)
+        if (activeTmuxSessions.has(session.tmuxSession)) {
+          continue;
         }
 
-        // External Codex sessions clean up faster (5 min) since they have no persistent process
-        const threshold = session.agent === 'codex' ? CODEX_CLEANUP_MS : OFFLINE_CLEANUP_MS;
-
-        if (offlineTime >= threshold) {
-          log(`Auto-cleaning stale ${session.agent || 'claude'} session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
+        // Tmux session is gone (e.g., after reboot) - safe to cleanup after threshold
+        const offlineTime = now - session.lastActivity;
+        if (offlineTime >= OFFLINE_CLEANUP_MS) {
+          log(`Auto-cleaning stale internal session: ${session.name} (tmux gone, offline for ${Math.round(offlineTime / 60000)} min)`);
           toDelete.push(session.id);
         }
       }
