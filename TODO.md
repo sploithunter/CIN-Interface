@@ -46,7 +46,7 @@
 - [x] Add option to minimize 3D map and maximize chat/activity interface
 - [ ] Add expand/collapse for Bash/script output in activity feed
 - [ ] Add expand/collapse for agent/subagent actions in activity feed
-- [ ] Auto-cleanup stale sessions (detect and remove sessions killed externally)
+- [x] Auto-cleanup stale sessions (detect and remove sessions killed externally)
 
 ### Medium Priority
 - [ ] Permission prompt handling in web UI
@@ -94,3 +94,5 @@
 - Map minimize/maximize toggle button and M keyboard shortcut (preference saved in localStorage)
 - Fixed expand/collapse to show full content height (removed max-height constraint)
 - Fixed dev mode static file path resolution (tsx watch now correctly serves from dist/)
+- Added DELETE /sessions/cleanup endpoint to remove all offline sessions
+- Added auto-cleanup for sessions offline > 1 hour (runs every minute)

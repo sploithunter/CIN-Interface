@@ -104,6 +104,9 @@ const TILES_FILE = resolve(expandHome(process.env.VIBECRAFT_TILES_FILE ?? '~/.vi
 /** Time before a "working" session auto-transitions to idle */
 const WORKING_TIMEOUT_MS = 120_000; // 2 minutes
 
+/** Time before offline sessions are auto-cleaned (1 hour) */
+const OFFLINE_CLEANUP_MS = 60 * 60 * 1000; // 1 hour
+
 /** Maximum request body size (1MB) */
 const MAX_BODY_SIZE = 1024 * 1024;
 
@@ -1072,6 +1075,27 @@ function checkWorkingTimeout(): void {
   }
 }
 
+/** Auto-cleanup sessions that have been offline for too long */
+function cleanupStaleOfflineSessions(): void {
+  const now = Date.now();
+  const toDelete: string[] = [];
+
+  for (const session of managedSessions.values()) {
+    if (session.status === 'offline') {
+      const offlineTime = now - session.lastActivity;
+      if (offlineTime >= OFFLINE_CLEANUP_MS) {
+        log(`Auto-cleaning stale session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
+        toDelete.push(session.id);
+      }
+    }
+  }
+
+  // Delete sessions (async, but we don't need to wait)
+  for (const id of toDelete) {
+    deleteSession(id);
+  }
+}
+
 interface SavedSessionsData {
   sessions: ManagedSession[];
   claudeToManagedMap: [string, string][];
@@ -1775,6 +1799,40 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
     return;
   }
 
+  // DELETE /sessions/cleanup - Remove offline sessions
+  const cleanupMatch = req.url?.match(/^\/sessions\/cleanup(\?.*)?$/);
+  if (req.method === 'DELETE' && cleanupMatch) {
+    const urlParams = new URLSearchParams(cleanupMatch[1] || '');
+    const maxAgeMs = parseInt(urlParams.get('maxAge') || '0', 10);
+    const now = Date.now();
+    const toDelete: string[] = [];
+
+    for (const session of managedSessions.values()) {
+      if (session.status === 'offline') {
+        if (maxAgeMs > 0) {
+          // Only delete if offline longer than maxAge
+          const offlineTime = now - session.lastActivity;
+          if (offlineTime >= maxAgeMs) {
+            toDelete.push(session.id);
+          }
+        } else {
+          // Delete all offline sessions
+          toDelete.push(session.id);
+        }
+      }
+    }
+
+    // Delete sessions
+    for (const id of toDelete) {
+      await deleteSession(id);
+    }
+
+    log(`Cleaned up ${toDelete.length} offline sessions`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, deleted: toDelete.length }));
+    return;
+  }
+
   // Session-specific endpoints: /sessions/:id
   const sessionMatch = req.url?.match(/^\/sessions\/([a-f0-9-]+)(?:\/(.+))?$/);
   if (sessionMatch) {
@@ -2190,7 +2248,9 @@ function main(): void {
     startRalphWiggumPolling();
     setInterval(checkSessionHealth, 5000);
     setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS);
+    setInterval(cleanupStaleOfflineSessions, 60_000); // Check every minute
     checkSessionHealth();
+    cleanupStaleOfflineSessions(); // Run once at startup
   });
 }
 
