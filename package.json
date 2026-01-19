@@ -30,10 +30,13 @@
     "data/.gitkeep"
   ],
   "scripts": {
-    "dev": "tsx watch src/server/index.ts",
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:client": "vite",
     "dev:server": "tsx watch src/server/index.ts",
-    "build": "tsc",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
     "build:server": "tsc",
+    "preview": "vite preview",
     "start": "node dist/server/index.js",
     "server": "tsx src/server/index.ts",
     "setup": "node bin/cli.js setup",
