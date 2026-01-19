@@ -26,14 +26,11 @@ async function cleanupTestSessions(): Promise<void> {
   }
   createdSessionIds.length = 0;
 
-  // Also clean up any orphaned test sessions by name or cwd
+  // Also clean up any orphaned test sessions by name prefix only
+  // IMPORTANT: Only match our specific TEST_PREFIX to avoid interfering with other test files
   const sessionsRes = await get('/sessions', SERVER_PORT);
   const orphanedSessions = sessionsRes.body.sessions.filter(
-    (s: any) =>
-      s.name?.startsWith(TEST_PREFIX) ||
-      s.name === 'tmp' ||  // Sessions created with cwd: '/tmp'
-      s.cwd === '/tmp' ||
-      s.cwd?.includes('__test__')
+    (s: any) => s.name?.startsWith(TEST_PREFIX)
   );
   for (const session of orphanedSessions) {
     try {
