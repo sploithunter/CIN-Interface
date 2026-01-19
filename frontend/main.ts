@@ -20,7 +20,7 @@ import {
   type PreToolUseEvent,
   type PostToolUseEvent,
   type ManagedSession,
-} from '../shared/types'
+} from './shared/types'
 import { soundManager } from './audio'
 
 // Expose for console testing (can remove in production)
@@ -91,6 +91,11 @@ const WS_URL = import.meta.env.DEV
 const API_URL = import.meta.env.DEV
   ? '/api'
   : `http://localhost:${AGENT_PORT}`
+
+// Debug: Log connection URLs
+console.log('[Vibecraft] DEV mode:', import.meta.env.DEV)
+console.log('[Vibecraft] WS_URL:', WS_URL)
+console.log('[Vibecraft] API_URL:', API_URL)
 
 // Create session API instance
 const sessionAPI = createSessionAPI(API_URL)

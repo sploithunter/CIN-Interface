@@ -10,7 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'frontend'),
-      '@shared': resolve(__dirname, 'shared'),
+      '@shared': resolve(__dirname, 'frontend/shared'),
     },
   },
   define: {
@@ -19,6 +19,10 @@ export default defineConfig({
   },
   server: {
     port: clientPort,
+    fs: {
+      // Allow serving files from shared/ outside the root
+      allow: ['..'],
+    },
     proxy: {
       '/ws': {
         target: `ws://localhost:${serverPort}`,
