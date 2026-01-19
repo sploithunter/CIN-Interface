@@ -101,6 +101,20 @@ console.log('[Vibecraft] API_URL:', API_URL)
 const sessionAPI = createSessionAPI(API_URL)
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Get the zone/session ID for a managed session.
+ * All events are normalized to use the managed session's id on the server,
+ * so we can use session.id universally for zones and filtering.
+ */
+function getSessionZoneId(session: ManagedSession | null | undefined): string | null {
+  if (!session) return null
+  return session.id
+}
+
+// ============================================================================
 // State
 // ============================================================================
 
@@ -191,18 +205,25 @@ function renderManagedSessions(): void {
 
   container.innerHTML = ''
 
-  // Update "All Sessions" count
+  // Split sessions into active and offline groups
+  const activeSessions = state.managedSessions.filter(s => s.status !== 'offline')
+  const offlineSessions = state.managedSessions.filter(s => s.status === 'offline')
+
+  // Update "All Sessions" count (only count active sessions prominently)
   const allCount = document.getElementById('all-sessions-count')
   if (allCount) {
-    const count = state.managedSessions.length
-    const working = state.managedSessions.filter(s => s.status === 'working').length
-    if (count === 0) {
+    const activeCount = activeSessions.length
+    const working = activeSessions.filter(s => s.status === 'working').length
+    if (activeCount === 0 && offlineSessions.length === 0) {
       allCount.textContent = 'Click "+ New" to start'
     } else if (working > 0) {
-      allCount.textContent = `${count} session${count > 1 ? 's' : ''}, ${working} working`
+      allCount.textContent = `${activeCount} active, ${working} working`
       allCount.className = 'session-detail working'
+    } else if (activeCount > 0) {
+      allCount.textContent = `${activeCount} active session${activeCount > 1 ? 's' : ''}`
+      allCount.className = 'session-detail'
     } else {
-      allCount.textContent = `${count} session${count > 1 ? 's' : ''}`
+      allCount.textContent = `${offlineSessions.length} offline`
       allCount.className = 'session-detail'
     }
   }
@@ -213,111 +234,175 @@ function renderManagedSessions(): void {
     allItem.classList.toggle('active', state.selectedManagedSession === null)
   }
 
-  state.managedSessions.forEach((session, index) => {
-    const el = document.createElement('div')
-    el.className = 'session-item'
-    if (session.id === state.selectedManagedSession) {
-      el.classList.add('active')
-    }
-
-    // Check if session needs attention
-    const needsAttention = state.attentionSystem?.needsAttention(session.id) ?? false
-    if (needsAttention) {
-      el.classList.add('needs-attention')
-    }
-
-    const statusClass = session.status
-    const hotkey = index < 6 ? getSessionKeybind(index) : '' // 1-6 shown in UI
-
-    // Time since last activity (needed for detail line)
-    const lastActive = session.lastActivity
-      ? formatTimeAgo(session.lastActivity)
-      : ''
-
-    // Build detail line with status and project
-    const projectName = session.cwd ? session.cwd.split('/').pop() : ''
-    let detail = ''
-    if (needsAttention) {
-      detail = '⚡ Needs attention'
-    } else if (session.status === 'waiting') {
-      detail = `⏳ Waiting for permission: ${session.currentTool || 'Unknown'}`
-    } else if (session.currentTool) {
-      detail = `Using ${session.currentTool}`
-    } else if (session.status === 'offline') {
-      detail = lastActive ? `Offline · was ${lastActive}` : 'Offline - click 🔄 to restart'
-    } else {
-      detail = projectName ? `📁 ${projectName}` : 'Ready'
-    }
-    const detailClass = session.status === 'working' ? 'session-detail working'
-      : session.status === 'waiting' ? 'session-detail attention'
-      : needsAttention ? 'session-detail attention'
-      : 'session-detail'
-
-    // Get last prompt for this session (via claudeSessionId)
-    const lastPrompt = session.claudeSessionId ? state.lastPrompts.get(session.claudeSessionId) : null
-    const truncatedPrompt = lastPrompt
-      ? (lastPrompt.length > 35 ? lastPrompt.slice(0, 32) + '...' : lastPrompt)
-      : null
-
-    // Build detailed tooltip
-    const tooltipParts = [
-      `Name: ${session.name}`,
-      `Status: ${session.status}`,
-      `tmux: ${session.tmuxSession}`,
-      session.claudeSessionId ? `Claude ID: ${session.claudeSessionId.slice(0, 12)}...` : 'Not linked yet',
-      session.cwd ? `Dir: ${session.cwd}` : '',
-      session.lastActivity ? `Last active: ${new Date(session.lastActivity).toLocaleString()}` : '',
-      lastPrompt ? `Last prompt: ${lastPrompt}` : '',
-    ].filter(Boolean)
-    el.title = tooltipParts.join('\n')
-
-    el.innerHTML = `
-      ${hotkey ? `<div class="session-hotkey">${hotkey}</div>` : ''}
-      <div class="session-status ${statusClass}"></div>
-      <div class="session-info">
-        <div class="session-name">${escapeHtml(session.name)}</div>
-        <div class="${detailClass}">${detail}${!needsAttention && session.status !== 'offline' && lastActive ? ` · ${lastActive}` : ''}</div>
-        ${truncatedPrompt ? `<div class="session-prompt">💬 ${escapeHtml(truncatedPrompt)}</div>` : ''}
-      </div>
-      <div class="session-actions">
-        ${session.status === 'offline' ? `<button class="restart-btn" title="Restart session">🔄</button>` : ''}
-        <button class="rename-btn" title="Rename">✏️</button>
-        <button class="delete-btn" title="Delete">🗑️</button>
-      </div>
-    `
-
-    // Click to select and filter
-    el.addEventListener('click', (e) => {
-      // Ignore if clicking action buttons
-      if ((e.target as HTMLElement).closest('.session-actions')) return
-      selectManagedSession(session.id)
-    })
-
-    // Rename button
-    el.querySelector('.rename-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation()
-      const newName = prompt('Enter new name:', session.name)
-      if (newName && newName !== session.name) {
-        renameManagedSession(session.id, newName)
-      }
-    })
-
-    // Delete button
-    el.querySelector('.delete-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation()
-      if (confirm(`Delete session "${session.name}"?`)) {
-        deleteManagedSession(session.id)
-      }
-    })
-
-    // Restart button (only shown for offline sessions)
-    el.querySelector('.restart-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation()
-      restartManagedSession(session.id, session.name)
-    })
-
+  // Render active sessions first
+  activeSessions.forEach((session, index) => {
+    const el = createSessionElement(session, index)
     container.appendChild(el)
   })
+
+  // Render offline section if there are offline sessions
+  if (offlineSessions.length > 0) {
+    const offlineSection = document.createElement('div')
+    offlineSection.className = 'offline-sessions-section'
+
+    // Check localStorage for collapsed state
+    const isCollapsed = localStorage.getItem('vibecraft-offline-collapsed') !== 'false'
+
+    const header = document.createElement('div')
+    header.className = `offline-sessions-header ${isCollapsed ? 'collapsed' : ''}`
+    header.innerHTML = `
+      <span class="offline-toggle-icon">${isCollapsed ? '▶' : '▼'}</span>
+      <span class="offline-label">Offline</span>
+      <span class="offline-count">${offlineSessions.length}</span>
+    `
+    header.addEventListener('click', () => {
+      const content = offlineSection.querySelector('.offline-sessions-content') as HTMLElement
+      const newCollapsed = !header.classList.contains('collapsed')
+      header.classList.toggle('collapsed', newCollapsed)
+      header.querySelector('.offline-toggle-icon')!.textContent = newCollapsed ? '▶' : '▼'
+      if (content) {
+        content.style.display = newCollapsed ? 'none' : 'grid'
+      }
+      localStorage.setItem('vibecraft-offline-collapsed', String(newCollapsed))
+    })
+    offlineSection.appendChild(header)
+
+    const content = document.createElement('div')
+    content.className = 'offline-sessions-content'
+    content.style.display = isCollapsed ? 'none' : 'grid'
+
+    offlineSessions.forEach((session, index) => {
+      // Index continues from active sessions for hotkeys
+      const el = createSessionElement(session, activeSessions.length + index)
+      content.appendChild(el)
+    })
+
+    offlineSection.appendChild(content)
+    container.appendChild(offlineSection)
+  }
+}
+
+/**
+ * Create a session item element
+ */
+function createSessionElement(session: ManagedSession, index: number): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'session-item'
+  if (session.id === state.selectedManagedSession) {
+    el.classList.add('active')
+  }
+
+  // Check if session needs attention
+  const needsAttention = state.attentionSystem?.needsAttention(session.id) ?? false
+  if (needsAttention) {
+    el.classList.add('needs-attention')
+  }
+
+  const statusClass = session.status
+  const hotkey = index < 6 ? getSessionKeybind(index) : '' // 1-6 shown in UI
+
+  // Time since last activity (needed for detail line)
+  const lastActive = session.lastActivity
+    ? formatTimeAgo(session.lastActivity)
+    : ''
+
+  // Build detail line with status and project
+  const projectName = session.cwd ? session.cwd.split('/').pop() : ''
+  let detail = ''
+  if (needsAttention) {
+    detail = '⚡ Needs attention'
+  } else if (session.status === 'waiting') {
+    detail = `⏳ Waiting for permission: ${session.currentTool || 'Unknown'}`
+  } else if (session.currentTool) {
+    detail = `Using ${session.currentTool}`
+  } else if (session.status === 'offline') {
+    detail = lastActive ? `Offline · was ${lastActive}` : 'Offline - click 🔄 to restart'
+  } else {
+    detail = projectName ? `📁 ${projectName}` : 'Ready'
+  }
+  const detailClass = session.status === 'working' ? 'session-detail working'
+    : session.status === 'waiting' ? 'session-detail attention'
+    : needsAttention ? 'session-detail attention'
+    : 'session-detail'
+
+  // Get last prompt for this session (via claudeSessionId)
+  const lastPrompt = session.claudeSessionId ? state.lastPrompts.get(session.claudeSessionId) : null
+  const truncatedPrompt = lastPrompt
+    ? (lastPrompt.length > 35 ? lastPrompt.slice(0, 32) + '...' : lastPrompt)
+    : null
+
+  // Build detailed tooltip
+  const tooltipParts = [
+    `Name: ${session.name}`,
+    `Status: ${session.status}`,
+    `tmux: ${session.tmuxSession}`,
+    session.claudeSessionId ? `Claude ID: ${session.claudeSessionId.slice(0, 12)}...` : 'Not linked yet',
+    session.cwd ? `Dir: ${session.cwd}` : '',
+    session.lastActivity ? `Last active: ${new Date(session.lastActivity).toLocaleString()}` : '',
+    lastPrompt ? `Last prompt: ${lastPrompt}` : '',
+  ].filter(Boolean)
+  el.title = tooltipParts.join('\n')
+
+  // Agent badge (Claude or Codex)
+  const agentIcon = session.agent === 'codex' ? '🤖' : '🧠'
+  const agentLabel = session.agent === 'codex' ? 'Codex' : 'Claude'
+
+  // Session type badge (internal/external)
+  const typeIcon = session.type === 'external' ? '🔗' : '📦'
+  const typeLabel = session.type === 'external' ? 'External' : 'Internal'
+
+  el.innerHTML = `
+    ${hotkey ? `<div class="session-hotkey">${hotkey}</div>` : ''}
+    <div class="session-status ${statusClass}"></div>
+    <div class="session-info">
+      <div class="session-name-row">
+        <span class="session-name">${escapeHtml(session.name)}</span>
+        <span class="session-badges">
+          <span class="session-badge agent-${session.agent || 'claude'}" title="${agentLabel}">${agentIcon}</span>
+          <span class="session-badge type-${session.type || 'external'}" title="${typeLabel}">${typeIcon}</span>
+        </span>
+      </div>
+      <div class="${detailClass}">${detail}${!needsAttention && session.status !== 'offline' && lastActive ? ` · ${lastActive}` : ''}</div>
+      ${truncatedPrompt ? `<div class="session-prompt">💬 ${escapeHtml(truncatedPrompt)}</div>` : ''}
+    </div>
+    <div class="session-actions">
+      ${session.status === 'offline' ? `<button class="restart-btn" title="Restart session">🔄</button>` : ''}
+      <button class="rename-btn" title="Rename">✏️</button>
+      <button class="delete-btn" title="Delete">🗑️</button>
+    </div>
+  `
+
+  // Click to select and filter
+  el.addEventListener('click', (e) => {
+    // Ignore if clicking action buttons
+    if ((e.target as HTMLElement).closest('.session-actions')) return
+    selectManagedSession(session.id)
+  })
+
+  // Rename button
+  el.querySelector('.rename-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const newName = prompt('Enter new name:', session.name)
+    if (newName && newName !== session.name) {
+      renameManagedSession(session.id, newName)
+    }
+  })
+
+  // Delete button
+  el.querySelector('.delete-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    if (confirm(`Delete session "${session.name}"?`)) {
+      deleteManagedSession(session.id)
+    }
+  })
+
+  // Restart button (only shown for offline sessions)
+  el.querySelector('.restart-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    restartManagedSession(session.id, session.name)
+  })
+
+  return el
 }
 
 /**
@@ -339,13 +424,14 @@ function selectManagedSession(sessionId: string | null): void {
   // Update feed filter to show only this session's events (or all if null)
   if (sessionId) {
     const session = state.managedSessions.find(s => s.id === sessionId)
-    // Filter by claudeSessionId if available, otherwise show nothing (session has no events yet)
-    state.feedManager?.setFilter(session?.claudeSessionId ?? '__none__')
+    const zoneId = getSessionZoneId(session)
+    // Filter by zone ID (claudeSessionId for Claude, managed id for Codex)
+    state.feedManager?.setFilter(zoneId ?? '__none__')
 
     // Focus the 3D zone if session is linked
-    if (session?.claudeSessionId && state.scene) {
-      state.scene.focusZone(session.claudeSessionId)
-      focusSession(session.claudeSessionId)
+    if (zoneId && state.scene) {
+      state.scene.focusZone(zoneId)
+      focusSession(zoneId)
     }
   } else {
     state.feedManager?.setFilter(null)  // Show all sessions
@@ -356,15 +442,26 @@ function selectManagedSession(sessionId: string | null): void {
     }
   }
 
-  // Update prompt target indicator for "all sessions" / null selection
-  if (!sessionId) {
-    const targetEl = document.getElementById('prompt-target')
-    if (targetEl) {
+  // Update prompt target indicator
+  const targetEl = document.getElementById('prompt-target')
+  if (targetEl) {
+    if (!sessionId) {
       targetEl.innerHTML = '<span style="color: rgba(255,255,255,0.4)">all sessions</span>'
       targetEl.title = 'Select a session to send prompts'
+    } else {
+      // Show selected session name in prompt target
+      const session = state.managedSessions.find(s => s.id === sessionId)
+      if (session) {
+        const index = state.managedSessions.indexOf(session) + 1
+        const agentIcon = session.agent === 'codex' ? '🤖' : '🧠'
+        targetEl.innerHTML = `
+          <span class="target-badge">${index}</span>
+          <span>${agentIcon} ${escapeHtml(session.name)}</span>
+        `
+        targetEl.title = `Prompts will be sent to ${session.name}`
+      }
     }
   }
-  // Note: when sessionId is set, focusSession() handles the prompt target update
 }
 
 /**
@@ -381,9 +478,10 @@ async function createManagedSession(
   cwd?: string,
   flags?: SessionFlags,
   hintPosition?: { x: number; z: number },
-  pendingZoneId?: string
+  pendingZoneId?: string,
+  agent?: AgentType
 ): Promise<void> {
-  const data = await sessionAPI.createSession(name, cwd, flags)
+  const data = await sessionAPI.createSession(name, cwd, flags, agent)
 
   if (!data.ok) {
     console.error('Failed to create session:', data.error)
@@ -631,19 +729,62 @@ function setupManagedSessions(): void {
     currentModalHint = null  // Clear hint when modal closes
   }
 
+  // Toggle Claude/Codex options based on agent selection
+  const agentRadios = document.querySelectorAll('input[name="session-agent"]')
+  const claudeOptions = document.getElementById('claude-options')
+  const codexOptions = document.getElementById('codex-options')
+
+  const updateAgentOptions = (): void => {
+    const selectedAgent = (document.querySelector('input[name="session-agent"]:checked') as HTMLInputElement)?.value
+    if (selectedAgent === 'codex') {
+      claudeOptions?.classList.add('hidden')
+      codexOptions?.classList.remove('hidden')
+    } else {
+      claudeOptions?.classList.remove('hidden')
+      codexOptions?.classList.add('hidden')
+    }
+  }
+
+  agentRadios.forEach(radio => {
+    radio.addEventListener('change', updateAgentOptions)
+  })
+
   const handleCreate = (): void => {
     const name = nameInput?.value.trim() || undefined
     const cwd = cwdInput?.value.trim() || undefined
 
-    // Read flag checkboxes
-    const continueCheck = document.getElementById('session-opt-continue') as HTMLInputElement
-    const skipPermsCheck = document.getElementById('session-opt-skip-perms') as HTMLInputElement
-    const chromeCheck = document.getElementById('session-opt-chrome') as HTMLInputElement
+    // Read agent selection
+    const agentRadio = document.querySelector('input[name="session-agent"]:checked') as HTMLInputElement
+    const agent = (agentRadio?.value || 'claude') as AgentType
 
-    const flags: SessionFlags = {
-      continue: continueCheck?.checked ?? true,
-      skipPermissions: skipPermsCheck?.checked ?? true,
-      chrome: chromeCheck?.checked ?? false,
+    // Read flag checkboxes based on agent type
+    let flags: SessionFlags = {}
+
+    if (agent === 'codex') {
+      // Codex flags
+      const codexSkipPermsCheck = document.getElementById('session-opt-codex-skip-perms') as HTMLInputElement
+      const codexModelSelect = document.getElementById('session-codex-model') as HTMLSelectElement
+
+      flags = {
+        skipPermissions: codexSkipPermsCheck?.checked ?? true,
+      }
+
+      // Add model if specified
+      const model = codexModelSelect?.value
+      if (model) {
+        (flags as any).model = model
+      }
+    } else {
+      // Claude flags
+      const continueCheck = document.getElementById('session-opt-continue') as HTMLInputElement
+      const skipPermsCheck = document.getElementById('session-opt-skip-perms') as HTMLInputElement
+      const chromeCheck = document.getElementById('session-opt-chrome') as HTMLInputElement
+
+      flags = {
+        continue: continueCheck?.checked ?? true,
+        skipPermissions: skipPermsCheck?.checked ?? true,
+        chrome: chromeCheck?.checked ?? false,
+      }
     }
 
     // Capture hint before closing modal (closeModal clears it)
@@ -672,7 +813,7 @@ function setupManagedSessions(): void {
     soundManager.play('modal_confirm')
 
     closeModal()
-    createManagedSession(name, cwd, flags, hintPosition ?? undefined, pendingId)
+    createManagedSession(name, cwd, flags, hintPosition ?? undefined, pendingId, agent)
   }
 
   const handleCancel = (): void => {
@@ -1238,6 +1379,46 @@ function updateKeybindHelper(mode: CameraMode): void {
 }
 
 /**
+ * Setup expanded read mode toggle
+ * Allows user to expand the feed panel for better reading
+ */
+function setupExpandedReadMode(): void {
+  const expandBtn = document.getElementById('expand-read-btn')
+  if (!expandBtn) return
+
+  // Restore saved preference
+  const savedMode = localStorage.getItem('cin-expanded-read-mode')
+  if (savedMode === 'true') {
+    document.body.classList.add('expanded-read-mode')
+  }
+
+  expandBtn.addEventListener('click', () => {
+    const isExpanded = document.body.classList.toggle('expanded-read-mode')
+    localStorage.setItem('cin-expanded-read-mode', String(isExpanded))
+
+    // Trigger Three.js resize after transition
+    setTimeout(() => {
+      window.dispatchEvent(new Event('resize'))
+    }, 350)
+  })
+
+  // Also support keyboard shortcut: 'M' for read mode
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'm' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+      const isExpanded = document.body.classList.toggle('expanded-read-mode')
+      localStorage.setItem('cin-expanded-read-mode', String(isExpanded))
+
+      setTimeout(() => {
+        window.dispatchEvent(new Event('resize'))
+      }, 350)
+    }
+  })
+}
+
+/**
  * Setup the dev panel for testing animations
  * Toggle with Alt+D
  */
@@ -1633,7 +1814,12 @@ function updatePromptTarget(sessionId: string, color: number): void {
   if (!targetEl) return
 
   // Look up managed session to get name and index
-  const managed = state.managedSessions.find(s => s.claudeSessionId === sessionId)
+  // Check by managed session id first, then claudeSessionId, then codexThreadId
+  const managed = state.managedSessions.find(s =>
+    s.id === sessionId ||
+    s.claudeSessionId === sessionId ||
+    s.codexThreadId === sessionId
+  )
   const colorHex = `#${color.toString(16).padStart(6, '0')}`
 
   if (managed) {
@@ -1777,8 +1963,11 @@ function handleEvent(event: ClaudeEvent) {
 
   // If no session (unlinked), still add to feed/timeline with default color but skip 3D updates
   const eventColor = session?.color ?? 0x888888
+  // Look up managed session to get agent type
+  const managedSession = state.managedSessions.find(s => s.id === event.sessionId)
+  const agentType = managedSession?.agent
   state.timelineManager?.add(event, eventColor)
-  state.feedManager?.add(event, eventColor)
+  state.feedManager?.add(event, eventColor, agentType)
 
   // Skip 3D scene updates for unlinked sessions
   if (!session) {
@@ -1876,7 +2065,7 @@ function handleEvent(event: ClaudeEvent) {
 
       // Show thinking indicator AFTER feedManager.add() to ensure correct order
       // (prompt appears first, then thinking indicator)
-      state.feedManager?.showThinking(event.sessionId, session.color)
+      state.feedManager?.showThinking(event.sessionId, session.color, managedSession?.agent)
 
       // Update UI badge (zone attention cleared by zoneHandlers)
       updateAttentionBadge()
@@ -2698,12 +2887,18 @@ function init() {
     // Server is the source of truth for session linking
     claudeToManagedLink.clear()
     for (const session of sessions) {
-      if (session.claudeSessionId) {
-        claudeToManagedLink.set(session.claudeSessionId, session.id)
+      // Get the zone ID for this session (claudeSessionId for Claude, managed id for Codex)
+      const zoneId = getSessionZoneId(session)
+
+      if (zoneId) {
+        // Only add to link map for Claude sessions (Codex sessions use managed.id directly)
+        if (session.claudeSessionId) {
+          claudeToManagedLink.set(session.claudeSessionId, session.id)
+        }
 
         // Proactively create zone if it doesn't exist yet
         // This handles sessions that have no recent events in history
-        if (state.scene && !state.scene.zones.has(session.claudeSessionId)) {
+        if (state.scene && !state.scene.zones.has(zoneId)) {
           // Use saved position if available
           let hintPosition: { x: number; z: number } | undefined
           if (session.zonePosition) {
@@ -2713,11 +2908,11 @@ function init() {
           } else {
             console.log(`Creating zone for session "${session.name}" (no recent events in history)`)
           }
-          const zone = state.scene.createZone(session.claudeSessionId, { hintPosition })
+          const zone = state.scene.createZone(zoneId, { hintPosition })
 
           // Play zone creation sound
           if (state.soundEnabled) {
-            soundManager.play('zone_create', { zoneId: session.claudeSessionId })
+            soundManager.play('zone_create', { zoneId })
           }
 
           // Create Claude entity for this zone
@@ -2743,12 +2938,12 @@ function init() {
               activeSubagents: 0,
             },
           }
-          state.sessions.set(session.claudeSessionId, sessionState)
+          state.sessions.set(zoneId, sessionState)
 
           // Update zone label with session name
           const keybindIndex = sessions.indexOf(session)
           const keybind = keybindIndex >= 0 ? getSessionKeybind(keybindIndex) : undefined
-          state.scene.updateZoneLabel(session.claudeSessionId, session.name, keybind)
+          state.scene.updateZoneLabel(zoneId, session.name, keybind)
         }
 
         // Update zone floor status based on session status
@@ -2758,19 +2953,19 @@ function init() {
             : session.status === 'waiting' ? 'waiting'
             : session.status === 'offline' ? 'offline'
             : 'idle'
-          state.scene.setZoneStatus(session.claudeSessionId, zoneStatus)
+          state.scene.setZoneStatus(zoneId, zoneStatus)
         }
       }
     }
 
     // Clean up orphaned zones (zones not linked to any managed session)
     if (state.scene) {
-      const activeClaudeIds = new Set(
-        sessions.map(s => s.claudeSessionId).filter(Boolean)
+      const activeZoneIds = new Set(
+        sessions.map(s => getSessionZoneId(s)).filter(Boolean) as string[]
       )
       const zonesToDelete: string[] = []
       for (const [zoneId] of state.scene.zones) {
-        if (!activeClaudeIds.has(zoneId)) {
+        if (!activeZoneIds.has(zoneId)) {
           zonesToDelete.push(zoneId)
         }
       }
@@ -2924,6 +3119,9 @@ function init() {
 
   // Setup about modal
   setupAboutModal()
+
+  // Setup expanded read mode toggle
+  setupExpandedReadMode()
 
   // Setup dev panel (animation testing, Alt+D to toggle)
   setupDevPanel()

@@ -176,10 +176,19 @@ export interface ManagedSession {
 }
 
 export interface SessionFlags {
-  continue?: boolean;
-  skipPermissions?: boolean;
-  chrome?: boolean;
-  openTerminal?: boolean;  // Open Terminal.app attached to tmux session (default: true)
+  // Claude-specific flags
+  continue?: boolean;           // Claude: -c (continue conversation)
+  skipPermissions?: boolean;    // Claude: --dangerously-skip-permissions, Codex: --dangerously-bypass-approvals-and-sandbox
+  chrome?: boolean;             // Claude: --chrome
+
+  // Codex-specific flags
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';  // Codex: --sandbox
+  approval?: 'untrusted' | 'on-failure' | 'on-request' | 'never';    // Codex: --ask-for-approval
+  fullAuto?: boolean;           // Codex: --full-auto (convenience alias for -a on-request, --sandbox workspace-write)
+  model?: string;               // Codex: --model (e.g., 'gpt-5.2-codex-high', 'o3')
+
+  // Shared flags
+  openTerminal?: boolean;       // Open Terminal.app attached to tmux session (default: true)
 }
 
 export interface CreateSessionOptions {

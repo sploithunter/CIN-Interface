@@ -9,7 +9,7 @@
  */
 
 import { getToolIcon } from '../utils/ToolUtils'
-import type { ClaudeEvent, PreToolUseEvent, PostToolUseEvent } from '../../shared/types'
+import type { ClaudeEvent, PreToolUseEvent, PostToolUseEvent, AgentType } from '../../shared/types'
 
 export class FeedManager {
   private feedEl: HTMLElement | null = null
@@ -122,7 +122,7 @@ export class FeedManager {
   /**
    * Show a "thinking" indicator for a session
    */
-  showThinking(sessionId: string, sessionColor?: number): void {
+  showThinking(sessionId: string, sessionColor?: number, agent?: AgentType): void {
     if (!this.feedEl) return
 
     // Don't show duplicate thinking indicators
@@ -141,10 +141,11 @@ export class FeedManager {
       item.style.borderLeftStyle = 'solid'
     }
 
+    const agentName = agent === 'codex' ? 'Codex' : 'Claude'
     item.innerHTML = `
       <div class="feed-item-header">
         <div class="feed-item-icon thinking-icon">🤔</div>
-        <div class="feed-item-title">Claude is thinking</div>
+        <div class="feed-item-title">${agentName} is thinking</div>
         <div class="thinking-dots"><span>.</span><span>.</span><span>.</span></div>
       </div>
     `
@@ -192,7 +193,7 @@ export class FeedManager {
   /**
    * Add an event to the feed
    */
-  add(event: ClaudeEvent, sessionColor?: number): void {
+  add(event: ClaudeEvent, sessionColor?: number, agent?: AgentType): void {
     if (!this.feedEl) return
 
     // Skip duplicates
@@ -394,7 +395,8 @@ export class FeedManager {
           }
         }
 
-        // If we have a response, show it as Claude's message
+        // If we have a response, show it as the agent's message
+        const agentName = agent === 'codex' ? 'Codex' : 'Claude'
         if (response) {
           item.classList.add('assistant-response')
           const isLong = response.length > 2000
@@ -402,7 +404,7 @@ export class FeedManager {
           item.innerHTML = `
             <div class="feed-item-header">
               <div class="feed-item-icon">🤖</div>
-              <div class="feed-item-title">Claude</div>
+              <div class="feed-item-title">${agentName}</div>
               <div class="feed-item-time">${new Date(event.timestamp).toLocaleTimeString()}</div>
             </div>
             <div class="feed-item-content assistant-text">${renderMarkdown(displayResponse)}${isLong ? '<span class="show-more">... [show more - Alt+E]</span>' : ''}</div>

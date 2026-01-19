@@ -69,8 +69,11 @@ const SESSIONS_FILE = resolve(expandHome(process.env.VIBECRAFT_SESSIONS_FILE ?? 
 const TILES_FILE = resolve(expandHome(process.env.VIBECRAFT_TILES_FILE ?? '~/.vibecraft/data/tiles.json'));
 /** Time before a "working" session auto-transitions to idle */
 const WORKING_TIMEOUT_MS = 120_000; // 2 minutes
-/** Time before offline sessions are auto-cleaned (1 hour) */
+/** Time before offline internal sessions with dead tmux are auto-cleaned (1 hour) */
 const OFFLINE_CLEANUP_MS = 60 * 60 * 1000; // 1 hour
+/** Time before ANY offline session (including external) is auto-cleaned (7 days) */
+const OFFLINE_STALE_CLEANUP_DAYS = 7;
+const OFFLINE_STALE_CLEANUP_MS = OFFLINE_STALE_CLEANUP_DAYS * 24 * 60 * 60 * 1000;
 /** Maximum request body size (1MB) */
 const MAX_BODY_SIZE = 1024 * 1024;
 /** How often to check for stale "working" sessions */
@@ -662,9 +665,29 @@ function createSession(options = {}) {
         // Build command based on agent type
         let agentCmd;
         if (agent === 'codex') {
-            // Codex CLI command with sensible defaults
+            // Codex CLI command
             const codexArgs = [];
-            codexArgs.push('--full-auto'); // workspace-write sandbox + on-request approval
+            // Handle model selection (e.g., 'gpt-5.2-codex-high', 'o3')
+            if (flags.model) {
+                codexArgs.push(`--model=${flags.model}`);
+            }
+            // Handle skipPermissions - maps to Codex's most permissive mode
+            if (flags.skipPermissions === true) {
+                codexArgs.push('--dangerously-bypass-approvals-and-sandbox');
+            }
+            else if (flags.fullAuto === true || (flags.fullAuto !== false && !flags.sandbox && !flags.approval)) {
+                // Default to --full-auto for convenience unless specific flags are set
+                codexArgs.push('--full-auto');
+            }
+            else {
+                // Fine-grained control via sandbox and approval flags
+                if (flags.sandbox) {
+                    codexArgs.push(`--sandbox=${flags.sandbox}`);
+                }
+                if (flags.approval) {
+                    codexArgs.push(`--ask-for-approval=${flags.approval}`);
+                }
+            }
             agentCmd = codexArgs.length > 0 ? `codex ${codexArgs.join(' ')}` : 'codex';
         }
         else {
@@ -1014,9 +1037,9 @@ function checkCodexSessionHealth() {
     }
 }
 /**
- * Auto-cleanup ONLY internal sessions whose tmux process is gone (e.g., after reboot).
- * External sessions (Claude and Codex) are NEVER auto-deleted to preserve event matching.
- * Users can manually delete sessions they don't want.
+ * Auto-cleanup offline sessions:
+ * 1. Internal sessions whose tmux process is gone - cleaned up after 1 hour
+ * 2. ALL sessions (including external) offline for > 7 days - cleaned up automatically
  */
 function cleanupStaleOfflineSessions() {
     const now = Date.now();
@@ -1025,17 +1048,24 @@ function cleanupStaleOfflineSessions() {
     exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
         const activeTmuxSessions = error ? new Set() : new Set(stdout.trim().split('\n').filter(Boolean));
         for (const session of managedSessions.values()) {
-            // Only auto-cleanup INTERNAL sessions - never external (preserves event mapping)
-            if (session.type !== 'internal') {
+            if (session.status !== 'offline') {
                 continue;
             }
-            if (session.status === 'offline' && session.tmuxSession) {
+            const offlineTime = now - session.lastActivity;
+            // Rule 1: Any session offline for > 7 days gets cleaned up (internal or external)
+            if (offlineTime >= OFFLINE_STALE_CLEANUP_MS) {
+                const days = Math.round(offlineTime / (24 * 60 * 60 * 1000));
+                log(`Auto-cleaning stale session: ${session.name} (offline for ${days} days)`);
+                toDelete.push(session.id);
+                continue;
+            }
+            // Rule 2: Internal sessions with dead tmux - cleaned up after 1 hour
+            if (session.type === 'internal' && session.tmuxSession) {
                 // If tmux session still exists, don't cleanup (something wrong with our state)
                 if (activeTmuxSessions.has(session.tmuxSession)) {
                     continue;
                 }
-                // Tmux session is gone (e.g., after reboot) - safe to cleanup after threshold
-                const offlineTime = now - session.lastActivity;
+                // Tmux session is gone (e.g., after reboot) - safe to cleanup after 1 hour
                 if (offlineTime >= OFFLINE_CLEANUP_MS) {
                     log(`Auto-cleaning stale internal session: ${session.name} (tmux gone, offline for ${Math.round(offlineTime / 60000)} min)`);
                     toDelete.push(session.id);
@@ -1045,6 +1075,9 @@ function cleanupStaleOfflineSessions() {
         // Delete sessions
         for (const id of toDelete) {
             deleteSession(id);
+        }
+        if (toDelete.length > 0) {
+            log(`Cleaned up ${toDelete.length} stale offline session(s)`);
         }
     });
 }
@@ -1364,6 +1397,22 @@ function findOrCreateCodexSession(codexThreadId, eventCwd, name) {
             return maybeUpdateSession(session);
         }
     }
+    // Check if there's an internal Codex session with matching cwd that hasn't been linked yet
+    // This happens when we create an internal session via UI and Codex starts inside it
+    for (const session of managedSessions.values()) {
+        if (session.agent === 'codex' &&
+            session.type === 'internal' &&
+            !session.codexThreadId &&
+            session.cwd === eventCwd) {
+            // Link this thread ID to the existing internal session
+            session.codexThreadId = codexThreadId;
+            codexToManagedMap.set(codexThreadId, session.id);
+            log(`Linked Codex thread ${codexThreadId.slice(0, 8)} to internal session: ${session.name}`);
+            broadcastSessions();
+            saveSessions();
+            return maybeUpdateSession(session);
+        }
+    }
     // Auto-create external session for this Codex thread
     const id = randomUUID();
     const dirName = eventCwd.split('/').pop() || 'Codex';
@@ -1498,12 +1547,15 @@ function addEvent(event) {
     if (codexThreadId) {
         // Codex event - use codexThreadId for session lookup
         managedSession = findOrCreateCodexSession(codexThreadId, event.cwd);
-        // Update event's sessionId to match managed session for frontend filtering
-        event.sessionId = managedSession.id;
     }
     else {
         // Claude event - use claudeSessionId for session lookup
         managedSession = findOrCreateExternalSession(event.sessionId, event.cwd, terminalInfo);
+    }
+    // Normalize: always use managed session ID for event sessionId
+    // This allows the frontend to use a single ID for zones and filtering
+    if (managedSession) {
+        event.sessionId = managedSession.id;
     }
     if (managedSession) {
         const prevStatus = managedSession.status;
@@ -1552,6 +1604,20 @@ function loadEventsFromFile() {
         try {
             const event = JSON.parse(line);
             processEvent(event);
+            // Normalize: always use managed session ID for event sessionId
+            // This allows the frontend to use a single ID for zones and filtering
+            const codexThreadId = event.codexThreadId;
+            let managedSession;
+            if (codexThreadId) {
+                managedSession = findOrCreateCodexSession(codexThreadId, event.cwd);
+            }
+            else {
+                // Claude event - look up by original sessionId (which is Claude's internal ID)
+                managedSession = findOrCreateExternalSession(event.sessionId, event.cwd);
+            }
+            if (managedSession) {
+                event.sessionId = managedSession.id;
+            }
             events.push(event);
         }
         catch {
@@ -2424,8 +2490,9 @@ async function handleHttpRequest(req, res) {
 function main() {
     log('Starting CIN-Interface server...');
     deepgramApiKey = loadDeepgramKey();
-    loadEventsFromFile();
+    // IMPORTANT: Load sessions FIRST so mappings exist before events are processed
     loadSessions();
+    loadEventsFromFile();
     loadTiles();
     gitStatusManager.setUpdateHandler(({ sessionId, status }) => {
         const session = managedSessions.get(sessionId);

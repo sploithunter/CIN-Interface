@@ -114,6 +114,10 @@ export interface SessionFlags {
     continue?: boolean;
     skipPermissions?: boolean;
     chrome?: boolean;
+    sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
+    approval?: 'untrusted' | 'on-failure' | 'on-request' | 'never';
+    fullAuto?: boolean;
+    model?: string;
     openTerminal?: boolean;
 }
 export interface CreateSessionOptions {

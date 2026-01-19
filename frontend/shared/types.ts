@@ -263,18 +263,30 @@ export interface TaskToolInput {
 /** Status of a managed Claude session */
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline'
 
+/** Type of agent running the session */
+export type AgentType = 'claude' | 'codex'
+
+/** Session type - internal (spawned by us) or external (detected) */
+export type SessionType = 'internal' | 'external'
+
 /** A managed Claude session */
 export interface ManagedSession {
   /** Our internal ID (UUID) */
   id: string
   /** User-friendly name ("Frontend", "Tests") */
   name: string
+  /** Session type - internal (we spawned it) or external (detected from hooks) */
+  type: SessionType
+  /** Agent type - claude or codex */
+  agent: AgentType
   /** Actual tmux session name */
-  tmuxSession: string
+  tmuxSession?: string
   /** Current status */
   status: SessionStatus
   /** Claude Code session ID (from events, may differ from our ID) */
   claudeSessionId?: string
+  /** Codex thread ID (for codex sessions) */
+  codexThreadId?: string
   /** Creation timestamp */
   createdAt: number
   /** Last activity timestamp */

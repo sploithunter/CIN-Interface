@@ -25,6 +25,7 @@ body {
   height: 100%;
   position: relative;
   border-right: 1px solid rgba(255, 255, 255, 0.1);
+  transition: width 0.3s ease;
 }
 
 #canvas-container {
@@ -40,6 +41,46 @@ body {
   flex-direction: column;
   background: #111;
   position: relative;
+  transition: width 0.3s ease;
+}
+
+/* Expanded read mode - minimize 3D, maximize feed */
+body.expanded-read-mode #scene-panel {
+  width: 20%;
+}
+
+body.expanded-read-mode #feed-panel {
+  width: 80%;
+}
+
+/* Expand toggle button */
+#expand-read-btn {
+  position: absolute;
+  left: -32px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 48px;
+  background: rgba(30, 30, 35, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px 0 0 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  transition: all 0.2s;
+  z-index: 10;
+}
+
+#expand-read-btn:hover {
+  background: rgba(50, 50, 60, 0.95);
+  color: #fff;
+}
+
+body.expanded-read-mode #expand-read-btn {
+  transform: translateY(-50%) rotate(180deg);
 }
 
 /* Common animations */
