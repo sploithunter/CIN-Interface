@@ -96,6 +96,11 @@
   - [x] Automatically remove zones for offline sessions from hex grid
   - [x] Offline sessions still accessible in sidebar (collapsed "OFFLINE" section)
   - [x] Zones restored when sessions come back online
+- [x] Claude suggestion display in prompt input
+  - [x] Show suggestion as placeholder text with 💡 icon
+  - [x] Tab key fills in the suggestion
+  - [x] 💡 indicator in prompt target area when suggestion available
+  - [x] Only displayed when session is idle/waiting (hidden when working)
 
 ### Low Priority / Future
 - [ ] Text labels on hex grid (partially implemented in frontend)

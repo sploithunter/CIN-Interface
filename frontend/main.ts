@@ -469,7 +469,7 @@ function selectManagedSession(sessionId: string | null): void {
       // Enable prompt for internal sessions
       if (promptInput) promptInput.disabled = false
       if (promptSubmit) promptSubmit.disabled = false
-      if (promptInput) promptInput.placeholder = 'Prompt... (drag & drop or paste images)'
+      if (promptInput) promptInput.placeholder = ''
     } else {
       // Show selected session name in prompt target
       const session = state.managedSessions.find(s => s.id === sessionId)
@@ -515,16 +515,27 @@ function selectManagedSession(sessionId: string | null): void {
           }
         } else {
           // Internal session - can send prompts
+          // Only show suggestion when session is idle or waiting (not when working)
+          const showSuggestion = session.suggestion && (session.status === 'idle' || session.status === 'waiting')
+          const suggestionHint = showSuggestion
+            ? `<span class="suggestion-hint" title="Press Tab to use suggestion">💡</span>`
+            : ''
           targetEl.innerHTML = `
             <span class="target-badge">${index}</span>
             <span>${agentIcon} ${escapeHtml(session.name)}</span>
+            ${suggestionHint}
           `
-          targetEl.title = `Prompts will be sent to ${session.name}`
+          targetEl.title = showSuggestion
+            ? `Prompts will be sent to ${session.name} (Tab to use suggestion)`
+            : `Prompts will be sent to ${session.name}`
 
           // Enable prompt input for internal sessions
           if (promptInput) {
             promptInput.disabled = false
-            promptInput.placeholder = 'Prompt... (drag & drop or paste images)'
+            // Show suggestion as placeholder only when idle/waiting
+            promptInput.placeholder = showSuggestion
+              ? `💡 ${session.suggestion}`
+              : ''
           }
           if (promptSubmit) promptSubmit.disabled = false
         }
@@ -2424,9 +2435,20 @@ function setupPromptForm() {
     // If no image, let the default paste behavior happen (for text)
   })
 
-  // Keyboard handling: Enter to send, Up/Down for history
+  // Keyboard handling: Tab for suggestion, Enter to send, Up/Down for history
   // Note: Skip if slash commands already handled the event
   input.addEventListener('keydown', (e) => {
+    // Tab to fill in suggestion (when input is empty and session is idle/waiting)
+    if (e.key === 'Tab' && !e.shiftKey && !input.value.trim()) {
+      const session = state.managedSessions.find(s => s.id === state.selectedManagedSession)
+      if (session?.suggestion && (session.status === 'idle' || session.status === 'waiting')) {
+        e.preventDefault()
+        input.value = session.suggestion
+        autoExpand()
+        return
+      }
+    }
+
     // Enter to send (Ctrl+Enter for newline)
     if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.defaultPrevented) {
       e.preventDefault()
@@ -3277,6 +3299,11 @@ function init() {
 
     state.managedSessions = sessions
     renderManagedSessions()
+
+    // Refresh prompt UI if a session is selected (to update suggestion display)
+    if (state.selectedManagedSession) {
+      selectManagedSession(state.selectedManagedSession)
+    }
 
     // Sync zone labels with managed session names
     syncZoneLabels()
