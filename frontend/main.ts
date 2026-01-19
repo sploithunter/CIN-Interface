@@ -302,6 +302,11 @@ function createSessionElement(session: ManagedSession, index: number): HTMLEleme
     el.classList.add('active')
   }
 
+  // Add class for external sessions (visual distinction with dotted border)
+  if (session.type === 'external') {
+    el.classList.add('session-external')
+  }
+
   // Check if session needs attention
   const needsAttention = state.attentionSystem?.needsAttention(session.id) ?? false
   if (needsAttention) {
@@ -452,25 +457,99 @@ function selectManagedSession(sessionId: string | null): void {
     }
   }
 
-  // Update prompt target indicator
+  // Update prompt target indicator and handle external sessions
   const targetEl = document.getElementById('prompt-target')
+  const promptInput = document.getElementById('prompt-input') as HTMLTextAreaElement | null
+  const promptSubmit = document.getElementById('prompt-submit') as HTMLButtonElement | null
+
   if (targetEl) {
     if (!sessionId) {
       targetEl.innerHTML = '<span style="color: rgba(255,255,255,0.4)">all sessions</span>'
       targetEl.title = 'Select a session to send prompts'
+      // Enable prompt for internal sessions
+      if (promptInput) promptInput.disabled = false
+      if (promptSubmit) promptSubmit.disabled = false
+      if (promptInput) promptInput.placeholder = 'Prompt... (drag & drop or paste images)'
     } else {
       // Show selected session name in prompt target
       const session = state.managedSessions.find(s => s.id === sessionId)
       if (session) {
         const index = state.managedSessions.indexOf(session) + 1
         const agentIcon = session.agent === 'codex' ? '🤖' : '🧠'
-        targetEl.innerHTML = `
-          <span class="target-badge">${index}</span>
-          <span>${agentIcon} ${escapeHtml(session.name)}</span>
-        `
-        targetEl.title = `Prompts will be sent to ${session.name}`
+        const isExternal = session.type === 'external'
+
+        if (isExternal) {
+          // External session - view only, optionally show Focus button if terminal info available
+          // Show button if any terminal info exists - backend has fallback to just activate Terminal.app
+          const hasTerminalInfo = !!session.terminal
+          const focusButtonHtml = hasTerminalInfo
+            ? `<button class="focus-terminal-btn" title="Focus the terminal window for this session">Focus Terminal</button>`
+            : ''
+
+          targetEl.innerHTML = `
+            <span class="target-badge external">${index}</span>
+            <span>${agentIcon} ${escapeHtml(session.name)}</span>
+            <span class="view-only-badge">VIEW ONLY</span>
+            ${focusButtonHtml}
+          `
+          targetEl.title = hasTerminalInfo
+            ? `External session - view only. Use Focus Terminal to interact.`
+            : `External session - view only. Interact via the original terminal.`
+
+          // Disable prompt input for external sessions
+          if (promptInput) {
+            promptInput.disabled = true
+            promptInput.placeholder = hasTerminalInfo
+              ? 'External session - use Focus Terminal to interact'
+              : 'External session - interact via the original terminal'
+          }
+          if (promptSubmit) promptSubmit.disabled = true
+
+          // Add focus terminal button handler if button exists
+          if (hasTerminalInfo) {
+            const focusBtn = targetEl.querySelector('.focus-terminal-btn')
+            focusBtn?.addEventListener('click', (e) => {
+              e.stopPropagation()
+              focusTerminalWindow(session.id)
+            })
+          }
+        } else {
+          // Internal session - can send prompts
+          targetEl.innerHTML = `
+            <span class="target-badge">${index}</span>
+            <span>${agentIcon} ${escapeHtml(session.name)}</span>
+          `
+          targetEl.title = `Prompts will be sent to ${session.name}`
+
+          // Enable prompt input for internal sessions
+          if (promptInput) {
+            promptInput.disabled = false
+            promptInput.placeholder = 'Prompt... (drag & drop or paste images)'
+          }
+          if (promptSubmit) promptSubmit.disabled = false
+        }
       }
     }
+  }
+}
+
+/**
+ * Focus the terminal window for an external session
+ */
+async function focusTerminalWindow(sessionId: string): Promise<void> {
+  try {
+    const response = await fetch(`${API_URL}/sessions/${sessionId}/focus`, {
+      method: 'POST',
+    })
+    const data = await response.json()
+    if (!data.ok) {
+      console.warn('Failed to focus terminal:', data.error)
+      // Show a toast or notification
+      toast.error(data.error || 'Could not focus terminal', { icon: '⚠️' })
+    }
+  } catch (err) {
+    console.error('Error focusing terminal:', err)
+    toast.error('Failed to focus terminal window', { icon: '⚠️' })
   }
 }
 

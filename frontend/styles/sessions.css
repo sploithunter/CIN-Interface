@@ -86,6 +86,20 @@
   border-color: rgba(167, 139, 250, 0.3);
 }
 
+/* External sessions - dotted border to indicate view-only */
+.session-item.session-external {
+  border: 1px dashed rgba(251, 191, 36, 0.4);
+}
+
+.session-item.session-external.active {
+  border: 1px dashed rgba(251, 191, 36, 0.6);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.session-item.session-external:hover {
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
 .session-item.active .session-name {
   color: #c4b5fd;
 }

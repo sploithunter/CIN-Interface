@@ -76,15 +76,22 @@
   - [x] Drag and drop images onto prompt input
   - [x] Paste images from clipboard (Ctrl+V)
   - [x] Image preview before sending
+- [x] Full screen chat mode
+  - [x] Toggle button (◀) on left edge of feed panel to expand/collapse
+  - [x] M keyboard shortcut to toggle
+  - [x] Persist preference in localStorage
 - [ ] File explorer UI component
   - [x] Backend API complete (files, file, tree endpoints)
   - [ ] File tree sidebar/panel
   - [ ] Click to view file contents
   - [ ] Integration with prompt input (reference files)
-- [ ] External session prompt UI clarity
-  - [ ] Disable/hide prompt input for external sessions (can't send messages to them)
-  - [ ] Show clear indicator that external sessions are view-only
-  - [ ] Consider tooltip or message explaining why prompts are disabled
+- [x] External session UX improvements
+  - [x] Disable prompt input for external sessions (can't send messages to them)
+  - [x] Show clear "VIEW ONLY" badge in prompt target area
+  - [x] Dotted border styling to distinguish external session cards
+  - [x] Add "Focus Terminal" button to bring the external terminal window to front
+    - Uses tmux select-pane for tmux sessions
+    - Activates Terminal.app via AppleScript
 - [x] Clean up 3D visualization for offline agents
   - [x] Automatically remove zones for offline sessions from hex grid
   - [x] Offline sessions still accessible in sidebar (collapsed "OFFLINE" section)

@@ -773,6 +773,85 @@ function openTerminalForTmux(tmuxSession: string): void {
   });
 }
 
+/**
+ * Focus the terminal window for an external session (macOS only)
+ * Tries multiple strategies: tmux pane, tty device, or just activate Terminal
+ */
+function focusExternalTerminal(terminalInfo: TerminalInfo): void {
+  if (process.platform !== 'darwin') {
+    debug('focusExternalTerminal: Not on macOS, skipping');
+    return;
+  }
+
+  const { tmuxPane, tmuxSocket, tty } = terminalInfo;
+
+  // Strategy 1: If running in tmux, select the pane and focus Terminal
+  if (tmuxPane) {
+    // Extract just the pane number (e.g., "%0" -> "0")
+    const paneId = tmuxPane.replace(/^%/, '');
+    const socketArg = tmuxSocket ? `-S "${tmuxSocket.split(',')[0]}"` : '';
+
+    // Select the tmux pane and then activate Terminal
+    const script = `
+      tell application "Terminal"
+        activate
+      end tell
+    `;
+
+    // First select the tmux pane
+    exec(`tmux ${socketArg} select-pane -t %${paneId} 2>/dev/null`, EXEC_OPTIONS, (err) => {
+      if (err) {
+        debug(`Could not select tmux pane %${paneId}: ${err.message}`);
+      }
+      // Then activate Terminal regardless
+      exec(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, EXEC_OPTIONS, (error) => {
+        if (error) {
+          log(`Failed to focus terminal: ${error.message}`);
+        } else {
+          log(`Focused terminal (tmux pane: ${tmuxPane})`);
+        }
+      });
+    });
+    return;
+  }
+
+  // Strategy 2: Use tty to find and focus the terminal window
+  if (tty) {
+    // AppleScript to find the window with the matching tty
+    // This is a best-effort approach - Terminal.app doesn't expose tty directly
+    // But activating Terminal.app is usually enough for the user to find their session
+    const script = `
+      tell application "Terminal"
+        activate
+      end tell
+    `;
+
+    exec(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, EXEC_OPTIONS, (error) => {
+      if (error) {
+        log(`Failed to focus terminal: ${error.message}`);
+      } else {
+        log(`Focused terminal (tty: ${tty})`);
+      }
+    });
+    return;
+  }
+
+  // Fallback: just activate Terminal.app
+  const script = `
+    tell application "Terminal"
+      activate
+    end tell
+  `;
+
+  exec(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, EXEC_OPTIONS, (error) => {
+    if (error) {
+      log(`Failed to focus terminal: ${error.message}`);
+    } else {
+      log('Focused Terminal.app');
+    }
+  });
+}
+
 function createSession(options: CreateSessionOptions = {}): Promise<ManagedSession> {
   return new Promise((resolve, reject) => {
     const id = randomUUID();
@@ -2487,6 +2566,36 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
         return;
       }
       openTerminalForTmux(session.tmuxSession);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    // POST /sessions/:id/focus - Focus the terminal window for an external session
+    if (req.method === 'POST' && action === 'focus') {
+      const session = getSession(sessionId);
+      if (!session) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Session not found' }));
+        return;
+      }
+
+      // Only external sessions need this - internal sessions can use /terminal endpoint
+      if (session.type !== 'external') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Use /terminal endpoint for internal sessions' }));
+        return;
+      }
+
+      const terminalInfo = session.terminal;
+      if (!terminalInfo) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'No terminal info available for this session' }));
+        return;
+      }
+
+      // Try to focus the terminal window
+      focusExternalTerminal(terminalInfo);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
       return;

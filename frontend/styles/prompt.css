@@ -34,6 +34,18 @@
   box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
 }
 
+/* Disabled state for external sessions */
+#prompt-input:disabled {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+}
+
+#prompt-input:disabled::placeholder {
+  color: rgba(255, 255, 255, 0.25);
+}
+
 #prompt-input::placeholder {
   color: rgba(255, 255, 255, 0.4);
 }
@@ -146,6 +158,42 @@
   padding: 1px 5px;
   border-radius: 4px;
   color: #000;
+}
+
+#prompt-target .target-badge.external {
+  background: rgba(251, 191, 36, 0.3);
+  color: #fbbf24;
+}
+
+/* View-only badge for external sessions */
+.view-only-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: 8px;
+}
+
+/* Focus terminal button */
+.focus-terminal-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  margin-left: 8px;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 4px;
+  color: #fbbf24;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.focus-terminal-btn:hover {
+  background: rgba(251, 191, 36, 0.25);
+  border-color: rgba(251, 191, 36, 0.6);
 }
 
 #prompt-status {
