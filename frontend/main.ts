@@ -1638,6 +1638,21 @@ function setupExpandedReadMode(): void {
         window.dispatchEvent(new Event('resize'))
       }, 350)
     }
+
+    // 'S' for sound toggle (mute/unmute)
+    if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+      state.soundEnabled = !state.soundEnabled
+      localStorage.setItem('vibecraft-sound-enabled', String(state.soundEnabled))
+      // Update mute button if it exists
+      const muteBtn = document.getElementById('mute-btn')
+      if (muteBtn) {
+        muteBtn.textContent = state.soundEnabled ? '🔊' : '🔇'
+        muteBtn.title = state.soundEnabled ? 'Mute sound (S)' : 'Unmute sound (S)'
+      }
+    }
   })
 }
 
@@ -2820,6 +2835,26 @@ function setupSettingsModal(): void {
       }
     }
   }
+
+  // Mute toggle button
+  const muteBtn = document.getElementById('mute-btn')
+  const updateMuteButton = () => {
+    if (muteBtn) {
+      muteBtn.textContent = state.soundEnabled ? '🔊' : '🔇'
+      muteBtn.title = state.soundEnabled ? 'Mute sound (S)' : 'Unmute sound (S)'
+    }
+  }
+  muteBtn?.addEventListener('click', () => {
+    state.soundEnabled = !state.soundEnabled
+    localStorage.setItem('vibecraft-sound-enabled', String(state.soundEnabled))
+    updateMuteButton()
+  })
+  // Load saved mute state
+  const savedSoundEnabled = localStorage.getItem('vibecraft-sound-enabled')
+  if (savedSoundEnabled !== null) {
+    state.soundEnabled = savedSoundEnabled === 'true'
+  }
+  updateMuteButton()
 
   // Open modal
   settingsBtn?.addEventListener('click', () => {
