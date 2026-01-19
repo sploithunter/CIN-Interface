@@ -425,6 +425,15 @@ function createSessionElement(session: ManagedSession, index: number): HTMLEleme
  * Also focuses the 3D zone if available
  */
 function selectManagedSession(sessionId: string | null): void {
+  // Clear input if it contains a suggestion from the previous session
+  const promptInput = document.getElementById('prompt-input') as HTMLTextAreaElement | null
+  if (promptInput && state.selectedManagedSession && state.selectedManagedSession !== sessionId) {
+    const prevSession = state.managedSessions.find(s => s.id === state.selectedManagedSession)
+    if (prevSession?.suggestion && promptInput.value === prevSession.suggestion) {
+      promptInput.value = ''
+    }
+  }
+
   state.selectedManagedSession = sessionId
   renderManagedSessions()
   // Sound is played in focusSession() when the zone is focused
@@ -459,7 +468,6 @@ function selectManagedSession(sessionId: string | null): void {
 
   // Update prompt target indicator and handle external sessions
   const targetEl = document.getElementById('prompt-target')
-  const promptInput = document.getElementById('prompt-input') as HTMLTextAreaElement | null
   const promptSubmit = document.getElementById('prompt-submit') as HTMLButtonElement | null
 
   if (targetEl) {
