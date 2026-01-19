@@ -2575,9 +2575,11 @@ function setupPromptForm() {
       if (state.selectedManagedSession && send) {
         const session = state.managedSessions.find(s => s.id === state.selectedManagedSession)
         data = await sendPromptToManagedSession(prompt)
-        if (data.ok && status) {
-          status.textContent = `Sent to ${session?.name || 'session'}!`
-          status.className = 'success'
+        if (data.ok) {
+          if (status) {
+            status.textContent = `Sent to ${session?.name || 'session'}!`
+            status.className = 'success'
+          }
           // Add to history and reset navigation
           state.promptHistory.push(prompt)
           state.historyIndex = -1
