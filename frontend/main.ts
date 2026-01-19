@@ -131,6 +131,14 @@ interface SessionState {
   }
 }
 
+// Image attachment for prompts
+interface PendingImage {
+  data: string  // base64-encoded image data
+  mediaType: string  // e.g., 'image/png', 'image/jpeg'
+  name?: string  // optional filename
+  previewUrl: string  // object URL for preview
+}
+
 interface AppState {
   scene: WorkshopScene | null
   client: EventClient | null
@@ -151,6 +159,7 @@ interface AppState {
   promptHistory: string[]  // History of sent prompts for up/down navigation
   historyIndex: number  // Current position in history (-1 = not navigating)
   historyDraft: string  // Saved draft when navigating history
+  pendingImages: PendingImage[]  // Images attached to the current prompt
 }
 
 const state: AppState = {
@@ -173,6 +182,7 @@ const state: AppState = {
   promptHistory: [],
   historyIndex: -1,
   historyDraft: '',
+  pendingImages: [],
 }
 
 // Expose for console testing (can remove in production)
@@ -608,6 +618,7 @@ async function restartManagedSession(sessionId: string, sessionName: string): Pr
 
 /**
  * Send a prompt to the selected managed session
+ * Includes any pending images and clears them after sending
  */
 async function sendPromptToManagedSession(prompt: string, sessionId?: string): Promise<{ ok: boolean; error?: string }> {
   const targetSession = sessionId ?? state.selectedManagedSession
@@ -615,7 +626,121 @@ async function sendPromptToManagedSession(prompt: string, sessionId?: string): P
     return { ok: false, error: 'No session selected' }
   }
 
-  return sessionAPI.sendPrompt(targetSession, prompt)
+  // Prepare images for API (without previewUrl)
+  const images = state.pendingImages.length > 0
+    ? state.pendingImages.map(img => ({
+        data: img.data,
+        mediaType: img.mediaType,
+        name: img.name,
+      }))
+    : undefined
+
+  const result = await sessionAPI.sendPrompt(targetSession, prompt, images)
+
+  // Clear pending images on success
+  if (result.ok) {
+    clearPendingImages()
+  }
+
+  return result
+}
+
+/**
+ * Clear all pending images and revoke object URLs
+ */
+function clearPendingImages(): void {
+  for (const img of state.pendingImages) {
+    URL.revokeObjectURL(img.previewUrl)
+  }
+  state.pendingImages = []
+  updateImagePreviewUI()
+}
+
+/**
+ * Add an image file to pending images
+ */
+async function addImageFromFile(file: File): Promise<boolean> {
+  // Validate file type
+  const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+  if (!validTypes.includes(file.type)) {
+    console.warn(`Invalid image type: ${file.type}`)
+    return false
+  }
+
+  // Validate file size (max 5MB)
+  if (file.size > 5 * 1024 * 1024) {
+    console.warn(`Image too large: ${(file.size / 1024 / 1024).toFixed(2)}MB`)
+    return false
+  }
+
+  // Read file as base64
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      // Extract base64 data (remove "data:image/png;base64," prefix)
+      const base64Data = dataUrl.split(',')[1]
+
+      const pendingImage: PendingImage = {
+        data: base64Data,
+        mediaType: file.type,
+        name: file.name,
+        previewUrl: URL.createObjectURL(file),
+      }
+
+      state.pendingImages.push(pendingImage)
+      updateImagePreviewUI()
+      resolve(true)
+    }
+    reader.onerror = () => {
+      console.error('Failed to read image file')
+      resolve(false)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+/**
+ * Remove a specific pending image by index
+ */
+function removePendingImage(index: number): void {
+  if (index >= 0 && index < state.pendingImages.length) {
+    URL.revokeObjectURL(state.pendingImages[index].previewUrl)
+    state.pendingImages.splice(index, 1)
+    updateImagePreviewUI()
+  }
+}
+
+/**
+ * Update the image preview UI in the prompt container
+ */
+function updateImagePreviewUI(): void {
+  const container = document.getElementById('image-preview-container')
+  if (!container) return
+
+  if (state.pendingImages.length === 0) {
+    container.innerHTML = ''
+    container.style.display = 'none'
+    return
+  }
+
+  container.style.display = 'flex'
+  container.innerHTML = state.pendingImages.map((img, index) => `
+    <div class="image-preview-item" data-index="${index}">
+      <img src="${img.previewUrl}" alt="${img.name || 'Image'}" />
+      <button class="image-preview-remove" title="Remove image">×</button>
+      <span class="image-preview-name">${img.name || 'Image'}</span>
+    </div>
+  `).join('')
+
+  // Add click handlers for remove buttons
+  container.querySelectorAll('.image-preview-remove').forEach((btn, index) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      removePendingImage(index)
+    })
+  })
 }
 
 // ============================================================================
@@ -2164,6 +2289,62 @@ function setupPromptForm() {
   // Setup slash command autocomplete
   setupSlashCommands(input)
 
+  // ============================================================================
+  // Image drag & drop handling
+  // ============================================================================
+  input.addEventListener('dragover', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    input.classList.add('drag-over')
+  })
+
+  input.addEventListener('dragleave', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    input.classList.remove('drag-over')
+  })
+
+  input.addEventListener('drop', async (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    input.classList.remove('drag-over')
+
+    const files = e.dataTransfer?.files
+    if (!files || files.length === 0) return
+
+    let addedCount = 0
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) {
+        const success = await addImageFromFile(file)
+        if (success) addedCount++
+      }
+    }
+
+    if (addedCount > 0) {
+      console.log(`Added ${addedCount} image(s)`)
+    }
+  })
+
+  // ============================================================================
+  // Image paste from clipboard
+  // ============================================================================
+  input.addEventListener('paste', async (e) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (file) {
+          await addImageFromFile(file)
+        }
+        return // Only handle first image
+      }
+    }
+    // If no image, let the default paste behavior happen (for text)
+  })
+
   // Keyboard handling: Enter to send, Up/Down for history
   // Note: Skip if slash commands already handled the event
   input.addEventListener('keydown', (e) => {
@@ -2896,6 +3077,11 @@ function init() {
           claudeToManagedLink.set(session.claudeSessionId, session.id)
         }
 
+        // Skip creating zones for offline sessions - they clutter the visualization
+        if (session.status === 'offline') {
+          continue
+        }
+
         // Proactively create zone if it doesn't exist yet
         // This handles sessions that have no recent events in history
         if (state.scene && !state.scene.zones.has(zoneId)) {
@@ -2947,21 +3133,26 @@ function init() {
         }
 
         // Update zone floor status based on session status
-        if (state.scene) {
+        // Note: offline sessions don't have zones (they're skipped above and cleaned up below)
+        if (state.scene && session.status !== 'offline') {
           // Map managed session status to zone status
           const zoneStatus = session.status === 'working' ? 'working'
             : session.status === 'waiting' ? 'waiting'
-            : session.status === 'offline' ? 'offline'
             : 'idle'
           state.scene.setZoneStatus(zoneId, zoneStatus)
         }
       }
     }
 
-    // Clean up orphaned zones (zones not linked to any managed session)
+    // Clean up orphaned zones and zones for offline sessions
+    // This keeps the visualization clean and usable
     if (state.scene) {
+      // Only active (non-offline) sessions should have zones
       const activeZoneIds = new Set(
-        sessions.map(s => getSessionZoneId(s)).filter(Boolean) as string[]
+        sessions
+          .filter(s => s.status !== 'offline')
+          .map(s => getSessionZoneId(s))
+          .filter(Boolean) as string[]
       )
       const zonesToDelete: string[] = []
       for (const [zoneId] of state.scene.zones) {

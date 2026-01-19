@@ -135,16 +135,22 @@ export function createSessionAPI(apiUrl: string) {
 
     /**
      * Send a prompt to a managed session
+     * Optionally include images as base64-encoded data
      */
     async sendPrompt(
       sessionId: string,
-      prompt: string
+      prompt: string,
+      images?: Array<{ data: string; mediaType: string; name?: string }>
     ): Promise<SimpleResponse> {
       try {
+        const body: { prompt: string; images?: typeof images } = { prompt }
+        if (images && images.length > 0) {
+          body.images = images
+        }
         const response = await fetch(`${apiUrl}/sessions/${sessionId}/prompt`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify(body),
         })
         return await response.json()
       } catch (e) {

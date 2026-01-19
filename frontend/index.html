@@ -3,28 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Watch and Manage Claude Code in 3D!" />
+    <meta name="description" content="Watch and Manage AI Coding Agents in 3D!" />
     <meta name="theme-color" content="#0f172a" />
-    <title>Vibecraft - Watch and Manage Claude Code in 3D!</title>
+    <title>CIN-Interface - Watch and Manage AI Coding Agents in 3D!</title>
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
 
     <!-- Open Graph / Social -->
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Vibecraft" />
-    <meta property="og:title" content="Vibecraft - Watch and Manage Claude Code in 3D!" />
-    <meta property="og:description" content="Watch and Manage Claude Code in 3D!" />
-    <meta property="og:image" content="https://vibecraft.sh/og-image.png" />
-    <meta property="og:url" content="https://vibecraft.sh" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Vibecraft - Watch and Manage Claude Code in 3D!" />
-    <meta name="twitter:description" content="Watch and Manage Claude Code in 3D!" />
-    <meta name="twitter:image" content="https://vibecraft.sh/og-image.png" />
-
-    <!-- Analytics -->
-    <script src="https://cdn.amplitude.com/script/3b78e993d3c7ddad9fb9ae615cc094b6.js"></script>
-    <script>window.amplitude.init('3b78e993d3c7ddad9fb9ae615cc094b6', {"fetchRemoteConfig":true,"autocapture":{"attribution":true,"fileDownloads":true,"formInteractions":true,"pageViews":true,"sessions":true,"elementInteractions":true,"networkTracking":true,"webVitals":true,"frustrationInteractions":true}});</script>
+    <meta property="og:site_name" content="CIN-Interface" />
+    <meta property="og:title" content="CIN-Interface - Watch and Manage AI Coding Agents in 3D!" />
+    <meta property="og:description" content="Watch and Manage AI Coding Agents in 3D!" />
   </head>
   <body>
     <div id="app">
@@ -150,9 +140,11 @@
             <div class="transcript-label"><span class="recording-dot"></span> Listening...</div>
             <div id="voice-transcript-text"></div>
           </div>
+          <!-- Image preview for attached images -->
+          <div id="image-preview-container" style="display: none;"></div>
           <form id="prompt-form">
             <div class="input-wrapper">
-              <textarea id="prompt-input" placeholder="Prompt..." autocomplete="off" rows="1"></textarea>
+              <textarea id="prompt-input" placeholder="Prompt... (drag & drop or paste images)" autocomplete="off" rows="1"></textarea>
             </div>
             <button type="submit" id="prompt-submit"><span class="btn-icon">↗</span> Send</button>
             <button type="button" id="prompt-cancel"><span class="btn-icon">◼</span> Stop</button>
@@ -296,7 +288,7 @@
             <input type="number" id="settings-port" value="4003" min="1" max="65535" />
             <span id="settings-port-status" class="port-status"></span>
           </div>
-          <div class="field-hint">Port where the Vibecraft agent is running. Changes require refresh.</div>
+          <div class="field-hint">Port where the CIN-Interface server is running. Changes require refresh.</div>
         </div>
 
         <div class="modal-field">
@@ -324,29 +316,29 @@
     <div id="about-modal">
       <div class="modal-content about-modal-content">
         <div class="modal-header">
-          <h3>Vibecraft</h3>
+          <h3>CIN-Interface</h3>
         </div>
 
         <div class="about-description">
-          <p>Vibecraft is a A 3D visualization app for Claude Code.</p>
-          <p>Watch and manage your claudes in real-time - now featuring hexagonal grids!</p>
-          <p class="about-subtitle">Vibecraft syncs with claude code instances running on your own machine. No files or
-          code are sent to the web server.</p>
+          <p>CIN-Interface is a 3D visualization app for AI coding agents.</p>
+          <p>Watch and manage your Claude and Codex sessions in real-time with hexagonal grids!</p>
+          <p class="about-subtitle">CIN-Interface syncs with agent instances running on your local machine. No files or
+          code are sent to any external server.</p>
         </div>
 
         <div class="about-section">
           <div class="about-section-title">Commands</div>
           <div class="about-commands">
-            <div class="about-cmd"><code>npx vibecraft</code><span>Start server</span></div>
-            <div class="about-cmd"><code>npx vibecraft doctor</code><span>Diagnose issues</span></div>
-            <div class="about-cmd"><code>npx vibecraft setup</code><span>Reinstall hooks</span></div>
-            <div class="about-cmd"><code>npx vibecraft uninstall</code><span>Remove hooks</span></div>
+            <div class="about-cmd"><code>npx cin-interface</code><span>Start server</span></div>
+            <div class="about-cmd"><code>npx cin-interface doctor</code><span>Diagnose issues</span></div>
+            <div class="about-cmd"><code>npx cin-interface setup</code><span>Setup Claude hooks</span></div>
+            <div class="about-cmd"><code>npx cin-interface setup-codex</code><span>Setup Codex hooks</span></div>
           </div>
         </div>
 
         <div class="about-section">
           <div class="about-section-title">Troubleshooting</div>
-          <p class="about-help-text">If a zone gets stuck, Claude Code may be waiting for input or in an unknown state. Attach to the tmux session to see what's happening:</p>
+          <p class="about-help-text">If a zone gets stuck, the agent may be waiting for input or in an unknown state. Attach to the tmux session to see what's happening:</p>
           <div class="about-commands">
             <div class="about-cmd"><code>tmux ls</code><span>List sessions</span></div>
             <div class="about-cmd"><code>tmux attach -t <em>session</em></code><span>Attach to session</span></div>
@@ -364,7 +356,7 @@
         <div class="about-footer">
           <span id="about-version" class="about-version">v0.0.0</span>
           <span class="about-sep">·</span>
-          <span class="about-credit">Elysian Labs</span>
+          <span class="about-credit">Fork of Vibecraft by Elysian Labs</span>
         </div>
 
         <div class="modal-actions">
@@ -490,17 +482,17 @@
     <!-- Not Connected Overlay -->
     <div id="not-connected-overlay">
       <div class="not-connected-content">
-        <h2>Vibecraft!</h2>
+        <h2>CIN-Interface</h2>
         <p class="not-connected-description">
-          Vibecraft is a 3D app to watch and manage Claude Code instances.
+          CIN-Interface is a 3D app to watch and manage AI coding agent instances.
         </p>
         <p class="not-connected-privacy">
-          Vibecraft syncs with CC instances running on your local machine. Vibecraft is an interface - no files or code
-          are sent to this server.
+          CIN-Interface syncs with agent instances running on your local machine. No files or code
+          are sent to any external server.
         </p>
         <div class="not-connected-setup">
           <p class="not-connected-setup-label">Get started:</p>
-          <div class="not-connected-code">npx vibecraft setup && npx vibecraft</div>
+          <div class="not-connected-code">npx cin-interface setup && npx cin-interface</div>
         </div>
         <div class="not-connected-actions">
           <button class="not-connected-btn not-connected-btn-retry" id="retry-connection">↻ Reconnect</button>

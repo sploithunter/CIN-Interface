@@ -54,8 +54,8 @@ export async function checkForUpdates(): Promise<void> {
     const fakeVersionInfo: VersionInfo = {
       latest: '99.0.0',
       minSupported: isCritical ? '99.0.0' : '0.1.0',
-      releaseUrl: 'https://github.com/nearcyan/vibecraft/releases',
-      updateCommand: 'npx vibecraft@latest setup',
+      releaseUrl: 'https://github.com/sploithunter/CIN-Interface/releases',
+      updateCommand: 'npx cin-interface@latest setup',
     }
     console.log(`[VersionChecker] Test mode: ${isCritical ? 'critical' : 'update'} banner`)
     showUpdateBanner('0.1.0', fakeVersionInfo, isCritical)

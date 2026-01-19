@@ -1,6 +1,6 @@
 {
-  "latest": "0.1.12",
+  "latest": "0.1.0",
   "minSupported": "0.1.0",
-  "releaseUrl": "https://github.com/Elysian-Labs/vibecraft/releases",
-  "updateCommand": "npx vibecraft@latest setup"
+  "releaseUrl": "https://github.com/sploithunter/CIN-Interface/releases",
+  "updateCommand": "npx cin-interface@latest setup"
 }
