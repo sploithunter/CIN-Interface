@@ -24,7 +24,7 @@ import { ProjectsManager } from './ProjectsManager.js';
 import { getCodexWatcher } from './CodexSessionWatcher.js';
 import { fileURLToPath } from 'url';
 // Bridge components
-import { createSessionManager, createFileWatcher, createTmuxExecutor, ClaudeAdapter, CodexAdapter, } from 'coding-agent-bridge';
+import { createSessionManager, createFileWatcher, createTmuxExecutor, createEventProcessor, ClaudeAdapter, CodexAdapter, } from 'coding-agent-bridge';
 // =============================================================================
 // Version (read from package.json)
 // =============================================================================
@@ -204,6 +204,8 @@ const bridgeFileWatcher = createFileWatcher(EVENTS_FILE, {
     processExisting: false, // Only new events
     debug: DEBUG,
 });
+// EventProcessor to transform raw hook events (with hook_event_name) to normalized events (with type)
+const bridgeEventProcessor = createEventProcessor({ debug: DEBUG });
 // TmuxExecutor for safe tmux operations (replaces embedded tmux code)
 const bridgeTmux = createTmuxExecutor({ debug: DEBUG });
 /**
@@ -214,12 +216,20 @@ const bridgeTmux = createTmuxExecutor({ debug: DEBUG });
  */
 function initBridgeEventFlow() {
     // Connect FileWatcher output to event processing
-    // Parse each line as CINEvent and feed into existing addEvent()
+    // Use EventProcessor to transform raw hook events (hook_event_name) to normalized events (type)
     bridgeFileWatcher.on('line', (line) => {
         try {
-            const event = JSON.parse(line);
-            addEvent(event);
-            debug(`[Bridge] New event from file: ${event.type}`);
+            // Process through EventProcessor to transform hook_event_name -> type
+            const processed = bridgeEventProcessor.processLine(line);
+            if (processed) {
+                // ProcessedEvent has { event: AgentEvent, agentSessionId, ... }
+                const event = processed.event;
+                addEvent(event);
+                debug(`[Bridge] New event from file: ${event.type}`);
+            }
+            else {
+                debug(`[Bridge] EventProcessor returned null for: ${line.substring(0, 100)}`);
+            }
         }
         catch (e) {
             debug(`[Bridge] Failed to parse event: ${line.substring(0, 100)}`);
@@ -1868,9 +1878,16 @@ async function handleHttpRequest(req, res) {
     if (req.method === 'POST' && req.url === '/event') {
         try {
             const body = await collectRequestBody(req);
-            const event = JSON.parse(body);
-            addEvent(event);
-            debug(`Received event via HTTP: ${event.type}`);
+            // Use EventProcessor to transform raw hook events (hook_event_name) to normalized events (type)
+            const processed = bridgeEventProcessor.processLine(body);
+            if (processed) {
+                const event = processed.event;
+                addEvent(event);
+                debug(`Received event via HTTP: ${event.type}`);
+            }
+            else {
+                debug(`EventProcessor returned null for HTTP event: ${body.substring(0, 100)}`);
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true }));
         }
