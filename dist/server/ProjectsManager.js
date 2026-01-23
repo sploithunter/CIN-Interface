@@ -4,7 +4,7 @@
  * Stores directories the user has used, enabling quick project switching
  * and path autocomplete in the UI.
  *
- * Data stored in ~/.vibecraft/projects.json
+ * Data stored in ~/.cin-interface/projects.json
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, } from 'fs';
 import { resolve, join, basename, dirname } from 'path';
@@ -14,7 +14,7 @@ export class ProjectsManager {
     configFile;
     projects = [];
     constructor() {
-        this.configDir = resolve(homedir(), '.vibecraft');
+        this.configDir = resolve(homedir(), '.cin-interface');
         this.configFile = join(this.configDir, 'projects.json');
         this.load();
     }

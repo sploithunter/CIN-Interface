@@ -4,7 +4,7 @@
  * Stores directories the user has used, enabling quick project switching
  * and path autocomplete in the UI.
  *
- * Data stored in ~/.vibecraft/projects.json
+ * Data stored in ~/.cin-interface/projects.json
  */
 import type { Project } from '../shared/types.js';
 export declare class ProjectsManager {

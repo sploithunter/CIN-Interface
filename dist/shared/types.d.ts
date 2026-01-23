@@ -5,100 +5,49 @@
  * - Hook scripts (produce events)
  * - WebSocket server (relay events)
  * - Three.js client (consume events)
+ *
+ * Base event and session types are imported from coding-agent-bridge.
+ * CIN-specific types (tiles, projects, git status, 3D visualization) are defined here.
  */
+export type { AgentType, SessionStatus, SessionType, TerminalInfo, Session, SessionFilter, EventType, BaseEvent, PreToolUseEvent, PostToolUseEvent, StopEvent, SubagentStopEvent, SessionStartEvent, SessionEndEvent, UserPromptSubmitEvent, NotificationEvent, AgentEvent, BridgeConfig, ResolvedConfig, HookConfig, AgentCommandOptions, AgentAdapter, ImageInput, SendResult, } from 'coding-agent-bridge';
 /** Map tools to stations in the 3D visualization */
 export declare const TOOL_STATION_MAP: Record<string, string>;
 /** Get station for a tool (handles unknown/MCP tools) */
 export declare function getStationForTool(tool: string): string;
-export type EventType = 'pre_tool_use' | 'post_tool_use' | 'stop' | 'subagent_stop' | 'session_start' | 'session_end' | 'user_prompt_submit' | 'notification' | 'pre_compact' | 'unknown';
-/** Base event structure */
-export interface BaseEvent {
-    id: string;
-    timestamp: number;
-    type: EventType;
-    sessionId: string;
-    cwd: string;
-    agent?: AgentType;
+import type { BaseEvent, AgentType } from 'coding-agent-bridge';
+/** Base event structure for CIN-specific events (allows custom types) */
+interface CINBaseEvent extends Omit<BaseEvent, 'type'> {
+    type: string;
 }
-/** Pre-tool-use event */
-export interface PreToolUseEvent extends BaseEvent {
-    type: 'pre_tool_use';
-    tool: string;
-    toolInput: Record<string, unknown>;
-    toolUseId: string;
-    assistantText?: string;
-}
-/** Post-tool-use event */
-export interface PostToolUseEvent extends BaseEvent {
-    type: 'post_tool_use';
-    tool: string;
-    toolInput: Record<string, unknown>;
-    toolResponse: Record<string, unknown>;
-    toolUseId: string;
-    success: boolean;
-    duration?: number;
-}
-/** Stop event */
-export interface StopEvent extends BaseEvent {
-    type: 'stop' | 'subagent_stop';
-    stopHookActive: boolean;
-    response?: string;
-}
-/** Terminal info for external sessions (captured from environment) */
-export interface TerminalInfo {
-    tmuxPane?: string;
-    tmuxSocket?: string;
-    tty?: string;
-}
-/** Session start event */
-export interface SessionStartEvent extends BaseEvent {
-    type: 'session_start';
-    source: string;
-    terminal?: TerminalInfo;
-}
-/** Session end event */
-export interface SessionEndEvent extends BaseEvent {
-    type: 'session_end';
-    reason: string;
-}
-/** User prompt submit event */
-export interface UserPromptSubmitEvent extends BaseEvent {
-    type: 'user_prompt_submit';
-    prompt: string;
-}
-/** Notification event */
-export interface NotificationEvent extends BaseEvent {
-    type: 'notification';
-    message: string;
-    notificationType: string;
-}
-/** Pre-compact event */
-export interface PreCompactEvent extends BaseEvent {
+/** Pre-compact event (CIN-specific) */
+export interface PreCompactEvent extends CINBaseEvent {
     type: 'pre_compact';
     trigger: string;
     customInstructions: string;
 }
 /** Unknown event (raw data preserved) */
-export interface UnknownEvent extends BaseEvent {
+export interface UnknownEvent extends CINBaseEvent {
     type: 'unknown';
     raw: Record<string, unknown>;
 }
-/** Union of all event types */
-export type VibecraftEvent = PreToolUseEvent | PostToolUseEvent | StopEvent | SessionStartEvent | SessionEndEvent | UserPromptSubmitEvent | NotificationEvent | PreCompactEvent | UnknownEvent;
-export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline';
-export type SessionType = 'internal' | 'external';
-export type AgentType = 'claude' | 'codex';
+/** Extended event type including CIN-specific events */
+export type CINEventType = 'pre_tool_use' | 'post_tool_use' | 'stop' | 'subagent_stop' | 'session_start' | 'session_end' | 'user_prompt_submit' | 'notification' | 'pre_compact' | 'unknown';
+/** Union of all CIN event types (bridge events + CIN-specific) */
+export type CINEvent = import('coding-agent-bridge').PreToolUseEvent | import('coding-agent-bridge').PostToolUseEvent | import('coding-agent-bridge').StopEvent | import('coding-agent-bridge').SubagentStopEvent | import('coding-agent-bridge').SessionStartEvent | import('coding-agent-bridge').SessionEndEvent | import('coding-agent-bridge').UserPromptSubmitEvent | import('coding-agent-bridge').NotificationEvent | PreCompactEvent | UnknownEvent;
 export interface ZonePosition {
     q: number;
     r: number;
 }
+/**
+ * CIN-specific managed session - extends bridge's Session with visualization fields
+ */
 export interface ManagedSession {
     id: string;
     name: string;
-    type: SessionType;
+    type: import('coding-agent-bridge').SessionType;
     agent: AgentType;
     tmuxSession?: string;
-    status: SessionStatus;
+    status: import('coding-agent-bridge').SessionStatus;
     createdAt: number;
     lastActivity: number;
     cwd: string;
@@ -108,7 +57,7 @@ export interface ManagedSession {
     zonePosition?: ZonePosition;
     suggestion?: string;
     autoAccept?: boolean;
-    terminal?: TerminalInfo;
+    terminal?: import('coding-agent-bridge').TerminalInfo;
 }
 export interface SessionFlags {
     continue?: boolean;
@@ -166,15 +115,18 @@ export interface TextTile {
 }
 export interface WSMessage {
     type: string;
+    /** Standard payload field per WEBSOCKET_INTERFACE.md spec */
+    data?: unknown;
+    /** Legacy payload field for backward compatibility */
     payload?: unknown;
 }
 export interface WSEventMessage extends WSMessage {
     type: 'event';
-    payload: VibecraftEvent;
+    payload: CINEvent;
 }
 export interface WSHistoryMessage extends WSMessage {
     type: 'history';
-    payload: VibecraftEvent[];
+    payload: CINEvent[];
 }
 export interface WSSessionsMessage extends WSMessage {
     type: 'sessions';

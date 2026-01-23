@@ -5,9 +5,12 @@
  * - Hook scripts (produce events)
  * - WebSocket server (relay events)
  * - Three.js client (consume events)
+ *
+ * Base event and session types are imported from coding-agent-bridge.
+ * CIN-specific types (tiles, projects, git status, 3D visualization) are defined here.
  */
 // =============================================================================
-// Tool-to-Station Mapping
+// Tool-to-Station Mapping (CIN-specific - 3D visualization)
 // =============================================================================
 /** Map tools to stations in the 3D visualization */
 export const TOOL_STATION_MAP = {

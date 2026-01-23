@@ -242,6 +242,9 @@ export interface TextTile {
 
 export interface WSMessage {
   type: string;
+  /** Standard payload field per WEBSOCKET_INTERFACE.md spec */
+  data?: unknown;
+  /** Legacy payload field for backward compatibility */
   payload?: unknown;
 }
 

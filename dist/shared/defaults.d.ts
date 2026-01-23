@@ -11,16 +11,16 @@ export declare const DEFAULTS: {
     readonly CLIENT_PORT: 4002;
     /**
      * Events file path.
-     * Uses ~/.vibecraft/ to ensure consistent location regardless of
+     * Uses ~/.cin-interface/ to ensure consistent location regardless of
      * how the app was installed (npx, global npm, local dev).
      * The ~ is expanded by the server at runtime.
      */
-    readonly EVENTS_FILE: "~/.vibecraft/data/events.jsonl";
+    readonly EVENTS_FILE: "~/.cin-interface/data/events.jsonl";
     /**
      * Sessions file path.
-     * Uses ~/.vibecraft/ for consistency across installations.
+     * Uses ~/.cin-interface/ for consistency across installations.
      */
-    readonly SESSIONS_FILE: "~/.vibecraft/data/sessions.json";
+    readonly SESSIONS_FILE: "~/.cin-interface/data/sessions.json";
     /** Max events to keep in memory */
     readonly MAX_EVENTS: 1000;
     /** tmux session name */

@@ -11,18 +11,20 @@
  */
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { watch } from 'chokidar';
-import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, unlinkSync, statSync, readdirSync, } from 'fs';
-import { exec, execFile, execSync } from 'child_process';
+// NOTE: chokidar import removed - file watching now handled by bridge's FileWatcher
+import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, statSync, readdirSync, } from 'fs';
+import { exec, execSync } from 'child_process';
 import { dirname, resolve, join, extname, basename } from 'path';
 import { hostname } from 'os';
-import { randomUUID, randomBytes } from 'crypto';
+import { randomUUID } from 'crypto';
 import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
 import { DEFAULTS } from '../shared/defaults.js';
 import { GitStatusManager } from './GitStatusManager.js';
 import { ProjectsManager } from './ProjectsManager.js';
 import { getCodexWatcher } from './CodexSessionWatcher.js';
 import { fileURLToPath } from 'url';
+// Bridge components
+import { createSessionManager, createFileWatcher, createTmuxExecutor, ClaudeAdapter, CodexAdapter, } from 'coding-agent-bridge';
 // =============================================================================
 // Version (read from package.json)
 // =============================================================================
@@ -59,14 +61,14 @@ function expandHome(path) {
     }
     return path;
 }
-const PORT = parseInt(process.env.VIBECRAFT_PORT ?? String(DEFAULTS.SERVER_PORT), 10);
-const EVENTS_FILE = resolve(expandHome(process.env.VIBECRAFT_EVENTS_FILE ?? DEFAULTS.EVENTS_FILE));
-const PENDING_PROMPT_FILE = resolve(expandHome(process.env.VIBECRAFT_PROMPT_FILE ?? '~/.vibecraft/data/pending-prompt.txt'));
-const MAX_EVENTS = parseInt(process.env.VIBECRAFT_MAX_EVENTS ?? String(DEFAULTS.MAX_EVENTS), 10);
-const DEBUG = process.env.VIBECRAFT_DEBUG === 'true';
-const TMUX_SESSION = process.env.VIBECRAFT_TMUX_SESSION ?? DEFAULTS.TMUX_SESSION;
-const SESSIONS_FILE = resolve(expandHome(process.env.VIBECRAFT_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE));
-const TILES_FILE = resolve(expandHome(process.env.VIBECRAFT_TILES_FILE ?? '~/.vibecraft/data/tiles.json'));
+const PORT = parseInt(process.env.CIN_PORT ?? String(DEFAULTS.SERVER_PORT), 10);
+const EVENTS_FILE = resolve(expandHome(process.env.CIN_EVENTS_FILE ?? DEFAULTS.EVENTS_FILE));
+const PENDING_PROMPT_FILE = resolve(expandHome(process.env.CIN_PROMPT_FILE ?? '~/.cin-interface/data/pending-prompt.txt'));
+const MAX_EVENTS = parseInt(process.env.CIN_MAX_EVENTS ?? String(DEFAULTS.MAX_EVENTS), 10);
+const DEBUG = process.env.CIN_DEBUG === 'true';
+const TMUX_SESSION = process.env.CIN_TMUX_SESSION ?? DEFAULTS.TMUX_SESSION;
+const SESSIONS_FILE = resolve(expandHome(process.env.CIN_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE));
+const TILES_FILE = resolve(expandHome(process.env.CIN_TILES_FILE ?? '~/.cin-interface/data/tiles.json'));
 /** Time before a "working" session auto-transitions to idle */
 const WORKING_TIMEOUT_MS = 120_000; // 2 minutes
 /** Time before offline internal sessions with dead tmux are auto-cleaned (1 hour) */
@@ -102,7 +104,8 @@ function isOriginAllowed(origin) {
         if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
             return true;
         }
-        if (url.hostname === 'vibecraft.sh' && url.protocol === 'https:') {
+        // Allow CIN-Interface hosted version if deployed
+        if (url.hostname === 'cin-interface.local' && url.protocol === 'https:') {
             return true;
         }
         return false;
@@ -132,16 +135,6 @@ function validateTmuxSession(name) {
     }
     return name;
 }
-function execFileAsync(cmd, args) {
-    return new Promise((resolve, reject) => {
-        execFile(cmd, args, EXEC_OPTIONS, (error) => {
-            if (error)
-                reject(error);
-            else
-                resolve();
-        });
-    });
-}
 function collectRequestBody(req, maxSize = MAX_BODY_SIZE) {
     return new Promise((resolve, reject) => {
         let body = '';
@@ -159,24 +152,16 @@ function collectRequestBody(req, maxSize = MAX_BODY_SIZE) {
         req.on('error', reject);
     });
 }
+/**
+ * Send text to a tmux session using bridge's TmuxExecutor.
+ * This replaces the embedded tmux code with the bridge component.
+ */
 async function sendToTmuxSafe(tmuxSession, text) {
-    validateTmuxSession(tmuxSession);
-    const tempFile = `/tmp/vibecraft-prompt-${Date.now()}-${randomBytes(16).toString('hex')}.txt`;
-    writeFileSync(tempFile, text);
-    try {
-        await execFileAsync('tmux', ['load-buffer', tempFile]);
-        await execFileAsync('tmux', ['paste-buffer', '-t', tmuxSession]);
-        await new Promise((r) => setTimeout(r, 100));
-        await execFileAsync('tmux', ['send-keys', '-t', tmuxSession, 'Enter']);
-    }
-    finally {
-        try {
-            unlinkSync(tempFile);
-        }
-        catch {
-            // Ignore cleanup errors
-        }
-    }
+    await bridgeTmux.pasteBuffer({
+        target: tmuxSession,
+        text,
+        sendEnter: true,
+    });
 }
 // =============================================================================
 // State
@@ -198,6 +183,92 @@ const voiceSessions = new Map();
 let deepgramApiKey = null;
 const claudeToManagedMap = new Map();
 let sessionCounter = 0;
+// =============================================================================
+// Bridge Components (from coding-agent-bridge)
+// =============================================================================
+// Session manager handles session CRUD, state machine, persistence, health checks
+const bridgeSessionManager = createSessionManager({
+    sessionsFile: SESSIONS_FILE,
+    defaultAgent: 'claude',
+    workingTimeoutMs: WORKING_TIMEOUT_MS,
+    offlineCleanupMs: OFFLINE_CLEANUP_MS,
+    staleCleanupMs: OFFLINE_STALE_CLEANUP_MS,
+    trackExternalSessions: true,
+    debug: DEBUG,
+});
+// Register agent adapters
+bridgeSessionManager.registerAdapter(ClaudeAdapter);
+bridgeSessionManager.registerAdapter(CodexAdapter);
+// File watcher monitors events.jsonl for new events
+const bridgeFileWatcher = createFileWatcher(EVENTS_FILE, {
+    processExisting: false, // Only new events
+    debug: DEBUG,
+});
+// TmuxExecutor for safe tmux operations (replaces embedded tmux code)
+const bridgeTmux = createTmuxExecutor({ debug: DEBUG });
+/**
+ * Wire up bridge event flow:
+ * FileWatcher → parse JSON → addEvent() → session routing → WebSocket broadcast
+ *
+ * This replaces the old watchEventsFile() function with bridge components.
+ */
+function initBridgeEventFlow() {
+    // Connect FileWatcher output to event processing
+    // Parse each line as CINEvent and feed into existing addEvent()
+    bridgeFileWatcher.on('line', (line) => {
+        try {
+            const event = JSON.parse(line);
+            addEvent(event);
+            debug(`[Bridge] New event from file: ${event.type}`);
+        }
+        catch (e) {
+            debug(`[Bridge] Failed to parse event: ${line.substring(0, 100)}`);
+        }
+    });
+    // Listen for session changes from bridge SessionManager
+    bridgeSessionManager.on('session:created', (session) => {
+        debug(`[Bridge] Session created: ${session.name} (${session.id})`);
+        // TODO: Sync with managedSessions once fully integrated
+    });
+    bridgeSessionManager.on('session:status', (session, from, to) => {
+        debug(`[Bridge] Session ${session.name}: ${from} -> ${to}`);
+        // TODO: Sync with managedSessions once fully integrated
+    });
+    bridgeSessionManager.on('session:deleted', (session) => {
+        debug(`[Bridge] Session deleted: ${session.name} (${session.id})`);
+        // TODO: Sync with managedSessions once fully integrated
+    });
+    bridgeSessionManager.on('error', (error) => {
+        console.error('[Bridge] SessionManager error:', error);
+    });
+    bridgeFileWatcher.on('error', (error) => {
+        console.error('[Bridge] FileWatcher error:', error);
+    });
+}
+/**
+ * Start bridge components
+ */
+async function startBridge() {
+    log('[Bridge] Starting bridge components...');
+    // Start session manager (loads state, starts health checks)
+    await bridgeSessionManager.start();
+    log('[Bridge] SessionManager started');
+    // Start file watcher
+    await bridgeFileWatcher.start();
+    log('[Bridge] FileWatcher started');
+    // Wire up event flow
+    initBridgeEventFlow();
+    log('[Bridge] Event flow wired');
+}
+/**
+ * Stop bridge components (for graceful shutdown)
+ */
+async function stopBridge() {
+    log('[Bridge] Stopping bridge components...');
+    await bridgeFileWatcher.stop();
+    await bridgeSessionManager.stop();
+    log('[Bridge] Bridge stopped');
+}
 // =============================================================================
 // Logging
 // =============================================================================
@@ -241,7 +312,7 @@ function parseTokensFromOutput(output) {
     }
     return maxTokens > 0 ? maxTokens : null;
 }
-function pollTokens(tmuxSession) {
+async function pollTokens(tmuxSession) {
     try {
         validateTmuxSession(tmuxSession);
     }
@@ -249,11 +320,8 @@ function pollTokens(tmuxSession) {
         debug(`Invalid tmux session for token polling: ${tmuxSession}`);
         return;
     }
-    execFile('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', '-50'], { ...EXEC_OPTIONS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-        if (error) {
-            debug(`Token poll failed: ${error.message}`);
-            return;
-        }
+    try {
+        const stdout = await bridgeTmux.capturePane(tmuxSession, { start: -50 });
         const hash = stdout.slice(-500);
         if (hash === lastTmuxHash)
             return;
@@ -286,7 +354,10 @@ function pollTokens(tmuxSession) {
             session.lastUpdate = Date.now();
             debug(`Token count reset detected: ${tokens}`);
         }
-    });
+    }
+    catch (error) {
+        debug(`Token poll failed: ${error instanceof Error ? error.message : error}`);
+    }
 }
 function startTokenPolling() {
     setInterval(() => {
@@ -368,7 +439,7 @@ function detectPermissionPrompt(output) {
 function detectBypassWarning(output) {
     return output.includes('WARNING') && output.includes('Bypass Permissions mode');
 }
-function pollPermissions(sessionId, tmuxSession) {
+async function pollPermissions(sessionId, tmuxSession) {
     try {
         validateTmuxSession(tmuxSession);
     }
@@ -376,22 +447,14 @@ function pollPermissions(sessionId, tmuxSession) {
         debug(`Invalid tmux session for permission polling: ${tmuxSession}`);
         return;
     }
-    execFile('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', '-50'], { ...EXEC_OPTIONS, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-        if (error) {
-            debug(`Permission poll failed for ${tmuxSession}: ${error.message}`);
-            return;
-        }
+    try {
+        const stdout = await bridgeTmux.capturePane(tmuxSession, { start: -50 });
         if (detectBypassWarning(stdout) && !bypassWarningHandled.has(sessionId)) {
             log(`Bypass permissions warning detected for session ${sessionId}, auto-accepting...`);
             bypassWarningHandled.add(sessionId);
-            execFile('tmux', ['send-keys', '-t', tmuxSession, '2'], EXEC_OPTIONS, (err) => {
-                if (err) {
-                    log(`Failed to auto-accept bypass warning: ${err.message}`);
-                }
-                else {
-                    log(`Bypass permissions warning accepted for session ${sessionId}`);
-                }
-            });
+            bridgeTmux.sendKeys({ target: tmuxSession, keys: '2' })
+                .then(() => log(`Bypass permissions warning accepted for session ${sessionId}`))
+                .catch((err) => log(`Failed to auto-accept bypass warning: ${err.message}`));
             return;
         }
         const prompt = detectPermissionPrompt(stdout);
@@ -434,7 +497,10 @@ function pollPermissions(sessionId, tmuxSession) {
                 broadcastSessions();
             }
         }
-    });
+    }
+    catch (error) {
+        debug(`Permission poll failed for ${tmuxSession}: ${error instanceof Error ? error.message : error}`);
+    }
 }
 function startPermissionPolling() {
     setInterval(() => {
@@ -469,16 +535,16 @@ function sendPermissionResponse(sessionId, optionNumber) {
         log(`Invalid tmux session name: ${session.tmuxSession}`);
         return false;
     }
-    execFile('tmux', ['send-keys', '-t', session.tmuxSession, optionNumber], EXEC_OPTIONS, (error) => {
-        if (error) {
-            log(`Failed to send permission response: ${error.message}`);
-            return;
-        }
+    bridgeTmux.sendKeys({ target: session.tmuxSession, keys: optionNumber })
+        .then(() => {
         log(`Sent permission response to ${session.name}: option ${optionNumber}`);
         pendingPermissions.delete(sessionId);
         session.status = 'working';
         session.currentTool = undefined;
         broadcastSessions();
+    })
+        .catch((error) => {
+        log(`Failed to send permission response: ${error.message}`);
     });
     return true;
 }
@@ -521,17 +587,15 @@ function extractSuggestion(output) {
     }
     return null;
 }
-function pollSuggestions(sessionId, tmuxSession) {
+async function pollSuggestions(sessionId, tmuxSession) {
     try {
         validateTmuxSession(tmuxSession);
     }
     catch {
         return;
     }
-    execFile('tmux', ['capture-pane', '-t', tmuxSession, '-p', '-S', '-20'], { ...EXEC_OPTIONS, maxBuffer: 1024 * 512 }, (error, stdout) => {
-        if (error) {
-            return;
-        }
+    try {
+        const stdout = await bridgeTmux.capturePane(tmuxSession, { start: -20 });
         const session = managedSessions.get(sessionId);
         if (!session)
             return;
@@ -551,7 +615,10 @@ function pollSuggestions(sessionId, tmuxSession) {
             debug(`Suggestion for ${session.name}: ${suggestion || '(none)'}`);
             broadcastSessions();
         }
-    });
+    }
+    catch {
+        // Ignore errors - session may have ended
+    }
 }
 function startSuggestionPolling() {
     setInterval(() => {
@@ -718,113 +785,98 @@ function focusExternalTerminal(terminalInfo) {
         }
     });
 }
-function createSession(options = {}) {
-    return new Promise((resolve, reject) => {
-        const id = randomUUID();
-        sessionCounter++;
-        const tmuxSession = `vibecraft-${shortId()}`;
-        let cwd;
-        try {
-            cwd = validateDirectoryPath(options.cwd || process.cwd());
+async function createSession(options = {}) {
+    const id = randomUUID();
+    sessionCounter++;
+    const tmuxSession = `cin-${shortId()}`;
+    const cwd = validateDirectoryPath(options.cwd || process.cwd());
+    // Default name to the directory name (project name)
+    const name = options.name || basename(cwd);
+    const agent = options.agent || 'claude';
+    const flags = options.flags || {};
+    // Build command based on agent type
+    let agentCmd;
+    if (agent === 'codex') {
+        // Codex CLI command
+        const codexArgs = [];
+        // Handle model selection (e.g., 'gpt-5.2-codex-high', 'o3')
+        if (flags.model) {
+            codexArgs.push(`--model=${flags.model}`);
         }
-        catch (err) {
-            reject(err);
-            return;
+        // Handle skipPermissions - maps to Codex's most permissive mode
+        if (flags.skipPermissions === true) {
+            codexArgs.push('--dangerously-bypass-approvals-and-sandbox');
         }
-        // Default name to the directory name (project name)
-        const name = options.name || basename(cwd);
-        const agent = options.agent || 'claude';
-        const flags = options.flags || {};
-        // Build command based on agent type
-        let agentCmd;
-        if (agent === 'codex') {
-            // Codex CLI command
-            const codexArgs = [];
-            // Handle model selection (e.g., 'gpt-5.2-codex-high', 'o3')
-            if (flags.model) {
-                codexArgs.push(`--model=${flags.model}`);
-            }
-            // Handle skipPermissions - maps to Codex's most permissive mode
-            if (flags.skipPermissions === true) {
-                codexArgs.push('--dangerously-bypass-approvals-and-sandbox');
-            }
-            else if (flags.fullAuto === true || (flags.fullAuto !== false && !flags.sandbox && !flags.approval)) {
-                // Default to --full-auto for convenience unless specific flags are set
-                codexArgs.push('--full-auto');
-            }
-            else {
-                // Fine-grained control via sandbox and approval flags
-                if (flags.sandbox) {
-                    codexArgs.push(`--sandbox=${flags.sandbox}`);
-                }
-                if (flags.approval) {
-                    codexArgs.push(`--ask-for-approval=${flags.approval}`);
-                }
-            }
-            agentCmd = codexArgs.length > 0 ? `codex ${codexArgs.join(' ')}` : 'codex';
+        else if (flags.fullAuto === true || (flags.fullAuto !== false && !flags.sandbox && !flags.approval)) {
+            // Default to --full-auto for convenience unless specific flags are set
+            codexArgs.push('--full-auto');
         }
         else {
-            // Claude CLI command
-            const claudeArgs = [];
-            // Don't use -c by default - each new session should start fresh
-            // Otherwise it might continue an existing conversation (like this one!)
-            if (flags.continue === true) {
-                claudeArgs.push('-c');
+            // Fine-grained control via sandbox and approval flags
+            if (flags.sandbox) {
+                codexArgs.push(`--sandbox=${flags.sandbox}`);
             }
-            if (flags.skipPermissions !== false) {
-                claudeArgs.push('--permission-mode=bypassPermissions');
-                claudeArgs.push('--dangerously-skip-permissions');
+            if (flags.approval) {
+                codexArgs.push(`--ask-for-approval=${flags.approval}`);
             }
-            if (flags.chrome) {
-                claudeArgs.push('--chrome');
-            }
-            agentCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude';
         }
-        // Two-step approach: create session without command, then send agent command via send-keys
-        // This prevents the session from closing when the agent exits or has startup issues
-        execFile('tmux', ['new-session', '-d', '-s', tmuxSession, '-c', cwd], EXEC_OPTIONS, (createError) => {
-            if (createError) {
-                log(`Failed to create tmux session: ${createError.message}`);
-                reject(new Error(`Failed to create tmux session: ${createError.message}`));
-                return;
-            }
-            // Now send the agent command to the session
-            execFile('tmux', ['send-keys', '-t', tmuxSession, agentCmd, 'Enter'], EXEC_OPTIONS, (sendError) => {
-                if (sendError) {
-                    log(`Failed to send command to session: ${sendError.message}`);
-                    // Kill the empty session since we couldn't start the agent
-                    exec(`tmux kill-session -t ${tmuxSession}`, EXEC_OPTIONS);
-                    reject(new Error(`Failed to start ${agent}: ${sendError.message}`));
-                    return;
-                }
-                const session = {
-                    id,
-                    name,
-                    type: 'internal',
-                    agent,
-                    tmuxSession,
-                    status: 'idle',
-                    createdAt: Date.now(),
-                    lastActivity: Date.now(),
-                    cwd,
-                    zonePosition: options.zonePosition,
-                };
-                managedSessions.set(id, session);
-                log(`Created ${agent} session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession}`);
-                if (cwd) {
-                    gitStatusManager.track(id, cwd);
-                    projectsManager.addProject(cwd, name);
-                }
-                // Open Terminal.app attached to the tmux session (default: true)
-                if (flags.openTerminal !== false) {
-                    openTerminalForTmux(tmuxSession);
-                }
-                broadcastSessions();
-                saveSessions();
-                resolve(session);
-            });
-        });
-    });
+        agentCmd = codexArgs.length > 0 ? `codex ${codexArgs.join(' ')}` : 'codex';
+    }
+    else {
+        // Claude CLI command
+        const claudeArgs = [];
+        // Don't use -c by default - each new session should start fresh
+        // Otherwise it might continue an existing conversation (like this one!)
+        if (flags.continue === true) {
+            claudeArgs.push('-c');
+        }
+        if (flags.skipPermissions !== false) {
+            claudeArgs.push('--permission-mode=bypassPermissions');
+            claudeArgs.push('--dangerously-skip-permissions');
+        }
+        if (flags.chrome) {
+            claudeArgs.push('--chrome');
+        }
+        agentCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude';
+    }
+    // Use bridge's createSession which handles the two-step approach:
+    // 1. Create empty session with new-session
+    // 2. Send command with send-keys + Enter
+    try {
+        await bridgeTmux.createSession(tmuxSession, { cwd, command: agentCmd });
+        const session = {
+            id,
+            name,
+            type: 'internal',
+            agent,
+            tmuxSession,
+            status: 'idle',
+            createdAt: Date.now(),
+            lastActivity: Date.now(),
+            cwd,
+            zonePosition: options.zonePosition,
+        };
+        managedSessions.set(id, session);
+        log(`Created ${agent} session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession}`);
+        if (cwd) {
+            gitStatusManager.track(id, cwd);
+            projectsManager.addProject(cwd, name);
+        }
+        // Open Terminal.app attached to the tmux session (default: true)
+        if (flags.openTerminal !== false) {
+            openTerminalForTmux(tmuxSession);
+        }
+        broadcastSessions();
+        saveSessions();
+        return session;
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log(`Failed to create session: ${message}`);
+        // Try to kill the session in case it was partially created
+        bridgeTmux.killSession(tmuxSession).catch(() => { });
+        throw new Error(`Failed to create session: ${message}`);
+    }
 }
 function getSessions() {
     return Array.from(managedSessions.values()).map((session) => ({
@@ -855,107 +907,90 @@ function updateSession(id, updates) {
     saveSessions();
     return session;
 }
-function deleteSession(id) {
-    return new Promise((resolve) => {
-        const session = managedSessions.get(id);
-        if (!session) {
-            resolve(false);
-            return;
-        }
-        const cleanup = () => {
-            managedSessions.delete(id);
-            gitStatusManager.untrack(id);
-            for (const [claudeId, managedId] of claudeToManagedMap) {
-                if (managedId === id) {
-                    claudeToManagedMap.delete(claudeId);
-                }
+async function deleteSession(id) {
+    const session = managedSessions.get(id);
+    if (!session) {
+        return false;
+    }
+    const cleanup = () => {
+        managedSessions.delete(id);
+        gitStatusManager.untrack(id);
+        for (const [claudeId, managedId] of claudeToManagedMap) {
+            if (managedId === id) {
+                claudeToManagedMap.delete(claudeId);
             }
-            log(`Deleted session: ${session.name} (${id.slice(0, 8)})`);
-            broadcastSessions();
-            saveSessions();
-            resolve(true);
-        };
-        // External sessions have no tmux to kill
-        if (!session.tmuxSession) {
-            cleanup();
-            return;
         }
+        log(`Deleted session: ${session.name} (${id.slice(0, 8)})`);
+        broadcastSessions();
+        saveSessions();
+    };
+    // External sessions have no tmux to kill
+    if (!session.tmuxSession) {
+        cleanup();
+        return true;
+    }
+    try {
+        validateTmuxSession(session.tmuxSession);
+    }
+    catch {
+        log(`Invalid tmux session name: ${session.tmuxSession}`);
+        cleanup(); // Still clean up the session record
+        return true;
+    }
+    // On macOS, get the Terminal window ID before killing tmux so we can close it
+    let terminalWindowId = null;
+    if (process.platform === 'darwin') {
         try {
-            validateTmuxSession(session.tmuxSession);
+            const result = execSync(`osascript -e '
+        tell application "Terminal"
+          repeat with w in windows
+            if name of w contains "${session.tmuxSession}" then
+              return id of w
+            end if
+          end repeat
+        end tell
+      '`, { encoding: 'utf8', timeout: 5000 }).trim();
+            if (result && /^\d+$/.test(result)) {
+                terminalWindowId = result;
+            }
         }
         catch {
-            log(`Invalid tmux session name: ${session.tmuxSession}`);
-            cleanup(); // Still clean up the session record
-            return;
+            // Ignore - window may not exist or Terminal not running
         }
-        // On macOS, get the Terminal window ID before killing tmux so we can close it
-        let terminalWindowId = null;
-        if (process.platform === 'darwin') {
+    }
+    // Kill the tmux session using bridge
+    const killed = await bridgeTmux.killSession(session.tmuxSession);
+    if (!killed) {
+        log(`Warning: Failed to kill tmux session: ${session.tmuxSession}`);
+    }
+    // On macOS, close the Terminal window that was attached to this session
+    // Add a small delay to let the tmux detach complete before closing Terminal
+    if (terminalWindowId) {
+        setTimeout(() => {
             try {
-                const result = execSync(`osascript -e '
-          tell application "Terminal"
-            repeat with w in windows
-              if name of w contains "${session.tmuxSession}" then
-                return id of w
-              end if
-            end repeat
-          end tell
-        '`, { encoding: 'utf8', timeout: 5000 }).trim();
-                if (result && /^\d+$/.test(result)) {
-                    terminalWindowId = result;
-                }
+                execSync(`osascript -e 'tell application "Terminal" to close (first window whose id is ${terminalWindowId})'`, { timeout: 5000 });
+                debug(`Closed Terminal window ${terminalWindowId} for session ${session.tmuxSession}`);
             }
             catch {
-                // Ignore - window may not exist or Terminal not running
+                // Ignore - window may have already closed
             }
-        }
-        execFile('tmux', ['kill-session', '-t', session.tmuxSession], EXEC_OPTIONS, (error) => {
-            if (error) {
-                log(`Warning: Failed to kill tmux session: ${error.message}`);
-            }
-            // On macOS, close the Terminal window that was attached to this session
-            // Add a small delay to let the tmux detach complete before closing Terminal
-            if (terminalWindowId) {
-                setTimeout(() => {
-                    try {
-                        execSync(`osascript -e 'tell application "Terminal" to close (first window whose id is ${terminalWindowId})'`, { timeout: 5000 });
-                        debug(`Closed Terminal window ${terminalWindowId} for session ${session.tmuxSession}`);
-                    }
-                    catch {
-                        // Ignore - window may have already closed
-                    }
-                }, 500);
-            }
-            cleanup();
-        });
-    });
+        }, 500);
+    }
+    cleanup();
+    return true;
 }
 /**
- * Send text to a tmux pane by pane ID (for external sessions running in tmux)
+ * Send text to a tmux pane by pane ID (for external sessions running in tmux).
+ * Uses bridge's TmuxExecutor for safe tmux operations.
  */
 async function sendToTmuxPane(tmuxPane, tmuxSocket, text) {
-    // Validate pane ID format (e.g., "%0", "%1", etc.)
-    if (!/^%\d+$/.test(tmuxPane)) {
-        throw new Error(`Invalid tmux pane ID: ${tmuxPane}`);
-    }
-    const tempFile = `/tmp/vibecraft-prompt-${Date.now()}-${randomBytes(16).toString('hex')}.txt`;
-    writeFileSync(tempFile, text);
-    try {
-        // Build tmux args - use socket if provided
-        const socketArgs = tmuxSocket ? ['-S', tmuxSocket.split(',')[0]] : [];
-        await execFileAsync('tmux', [...socketArgs, 'load-buffer', tempFile]);
-        await execFileAsync('tmux', [...socketArgs, 'paste-buffer', '-t', tmuxPane]);
-        await new Promise((r) => setTimeout(r, 100));
-        await execFileAsync('tmux', [...socketArgs, 'send-keys', '-t', tmuxPane, 'Enter']);
-    }
-    finally {
-        try {
-            unlinkSync(tempFile);
-        }
-        catch {
-            // Ignore cleanup errors
-        }
-    }
+    await bridgeTmux.pasteBuffer({
+        target: tmuxPane,
+        text,
+        isPaneId: true,
+        socket: tmuxSocket ? tmuxSocket.split(',')[0] : undefined,
+        sendEnter: true,
+    });
 }
 async function sendPromptToSession(id, prompt, images) {
     const session = managedSessions.get(id);
@@ -1023,18 +1058,14 @@ async function sendPromptToSession(id, prompt, images) {
     }
     return { ok: false, error: 'Cannot send prompts to this external session (no tmux pane info)' };
 }
-function checkSessionHealth() {
-    exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
-        if (error) {
-            // Mark only internal sessions as offline (external sessions don't use tmux)
-            for (const session of managedSessions.values()) {
-                if (session.tmuxSession && session.status !== 'offline') {
-                    session.status = 'offline';
-                }
-            }
-            return;
-        }
-        const activeSessions = new Set(stdout.trim().split('\n'));
+/**
+ * Check if tmux sessions are still alive.
+ * Uses bridge's TmuxExecutor for session listing.
+ */
+async function checkSessionHealth() {
+    try {
+        const tmuxSessions = await bridgeTmux.listSessions();
+        const activeSessions = new Set(tmuxSessions.map((s) => s.name));
         let changed = false;
         for (const session of managedSessions.values()) {
             // Skip external sessions (they don't have tmux)
@@ -1055,7 +1086,15 @@ function checkSessionHealth() {
             broadcastSessions();
             saveSessions();
         }
-    });
+    }
+    catch {
+        // Mark only internal sessions as offline (external sessions don't use tmux)
+        for (const session of managedSessions.values()) {
+            if (session.tmuxSession && session.status !== 'offline') {
+                session.status = 'offline';
+            }
+        }
+    }
 }
 function checkWorkingTimeout() {
     const now = Date.now();
@@ -1114,45 +1153,50 @@ function checkCodexSessionHealth() {
  * 1. Internal sessions whose tmux process is gone - cleaned up after 1 hour
  * 2. ALL sessions (including external) offline for > 7 days - cleaned up automatically
  */
-function cleanupStaleOfflineSessions() {
+async function cleanupStaleOfflineSessions() {
     const now = Date.now();
     const toDelete = [];
-    // Get list of active tmux sessions
-    exec('tmux list-sessions -F "#{session_name}"', EXEC_OPTIONS, (error, stdout) => {
-        const activeTmuxSessions = error ? new Set() : new Set(stdout.trim().split('\n').filter(Boolean));
-        for (const session of managedSessions.values()) {
-            if (session.status !== 'offline') {
+    // Get list of active tmux sessions using bridge
+    let activeTmuxSessions;
+    try {
+        const sessions = await bridgeTmux.listSessions();
+        activeTmuxSessions = new Set(sessions.map(s => s.name));
+    }
+    catch {
+        activeTmuxSessions = new Set();
+    }
+    for (const session of managedSessions.values()) {
+        if (session.status !== 'offline') {
+            continue;
+        }
+        const offlineTime = now - session.lastActivity;
+        // Rule 1: Any session offline for > 7 days gets cleaned up (internal or external)
+        if (offlineTime >= OFFLINE_STALE_CLEANUP_MS) {
+            const days = Math.round(offlineTime / (24 * 60 * 60 * 1000));
+            log(`Auto-cleaning stale session: ${session.name} (offline for ${days} days)`);
+            toDelete.push(session.id);
+            continue;
+        }
+        // Rule 2: Internal sessions with dead tmux - cleaned up after 1 hour
+        if (session.type === 'internal' && session.tmuxSession) {
+            // If tmux session still exists, don't cleanup (something wrong with our state)
+            if (activeTmuxSessions.has(session.tmuxSession)) {
                 continue;
             }
-            const offlineTime = now - session.lastActivity;
-            // Rule 1: Any session offline for > 7 days gets cleaned up (internal or external)
-            if (offlineTime >= OFFLINE_STALE_CLEANUP_MS) {
-                const days = Math.round(offlineTime / (24 * 60 * 60 * 1000));
-                log(`Auto-cleaning stale session: ${session.name} (offline for ${days} days)`);
+            // Tmux session is gone (e.g., after reboot) - safe to cleanup after 1 hour
+            if (offlineTime >= OFFLINE_CLEANUP_MS) {
+                log(`Auto-cleaning stale internal session: ${session.name} (tmux gone, offline for ${Math.round(offlineTime / 60000)} min)`);
                 toDelete.push(session.id);
-                continue;
-            }
-            // Rule 2: Internal sessions with dead tmux - cleaned up after 1 hour
-            if (session.type === 'internal' && session.tmuxSession) {
-                // If tmux session still exists, don't cleanup (something wrong with our state)
-                if (activeTmuxSessions.has(session.tmuxSession)) {
-                    continue;
-                }
-                // Tmux session is gone (e.g., after reboot) - safe to cleanup after 1 hour
-                if (offlineTime >= OFFLINE_CLEANUP_MS) {
-                    log(`Auto-cleaning stale internal session: ${session.name} (tmux gone, offline for ${Math.round(offlineTime / 60000)} min)`);
-                    toDelete.push(session.id);
-                }
             }
         }
-        // Delete sessions
-        for (const id of toDelete) {
-            deleteSession(id);
-        }
-        if (toDelete.length > 0) {
-            log(`Cleaned up ${toDelete.length} stale offline session(s)`);
-        }
-    });
+    }
+    // Delete sessions
+    for (const id of toDelete) {
+        await deleteSession(id);
+    }
+    if (toDelete.length > 0) {
+        log(`Cleaned up ${toDelete.length} stale offline session(s)`);
+    }
 }
 function saveSessions() {
     try {
@@ -1215,9 +1259,12 @@ function loadSessions() {
     }
 }
 function broadcastSessions() {
+    const sessions = getSessions();
+    // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
     broadcast({
         type: 'sessions',
-        payload: getSessions(),
+        data: sessions,
+        payload: sessions,
     });
 }
 // =============================================================================
@@ -1661,7 +1708,8 @@ function addEvent(event) {
             saveSessions();
         }
     }
-    broadcast({ type: 'event', payload: processed });
+    // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
+    broadcast({ type: 'event', data: processed, payload: processed });
 }
 // =============================================================================
 // File Watching
@@ -1700,44 +1748,8 @@ function loadEventsFromFile() {
     lastFileSize = content.length;
     log(`Loaded ${events.length} events from file`);
 }
-function watchEventsFile() {
-    const dir = dirname(EVENTS_FILE);
-    if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-    }
-    if (!existsSync(EVENTS_FILE)) {
-        appendFileSync(EVENTS_FILE, '');
-    }
-    const watcher = watch(EVENTS_FILE, {
-        persistent: true,
-        usePolling: true,
-        interval: 100,
-    });
-    watcher.on('change', () => {
-        try {
-            const content = readFileSync(EVENTS_FILE, 'utf-8');
-            if (content.length > lastFileSize) {
-                const newContent = content.slice(lastFileSize);
-                const newLines = newContent.trim().split('\n').filter(Boolean);
-                for (const line of newLines) {
-                    try {
-                        const event = JSON.parse(line);
-                        addEvent(event);
-                        debug(`New event from file: ${event.type}`);
-                    }
-                    catch {
-                        debug(`Failed to parse new event: ${line}`);
-                    }
-                }
-                lastFileSize = content.length;
-            }
-        }
-        catch (e) {
-            debug(`Error reading events file: ${e}`);
-        }
-    });
-    log(`Watching events file: ${EVENTS_FILE}`);
-}
+// NOTE: watchEventsFile() has been removed and replaced by bridge's FileWatcher
+// See initBridgeEventFlow() for the new implementation
 // =============================================================================
 // WebSocket
 // =============================================================================
@@ -1757,7 +1769,8 @@ function handleClientMessage(ws, message) {
         case 'get_history': {
             const limit = message.payload?.limit ?? 100;
             const history = events.slice(-limit);
-            ws.send(JSON.stringify({ type: 'history', payload: history }));
+            // Use 'data' per spec, keep 'payload' for backward compatibility
+            ws.send(JSON.stringify({ type: 'history', data: history, payload: history }));
             debug(`Sent ${history.length} historical events`);
             break;
         }
@@ -2084,24 +2097,16 @@ async function handleHttpRequest(req, res) {
                 res.end(JSON.stringify({ ok: false, error: 'Cannot cancel external sessions' }));
                 return;
             }
-            try {
-                validateTmuxSession(session.tmuxSession);
-            }
-            catch {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ ok: false, error: 'Invalid tmux session' }));
-                return;
-            }
-            execFile('tmux', ['send-keys', '-t', session.tmuxSession, 'C-c'], EXEC_OPTIONS, (error) => {
-                if (error) {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: false, error: error.message }));
-                }
-                else {
-                    log(`Sent Ctrl+C to ${session.name}`);
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: true }));
-                }
+            // Use bridge's TmuxExecutor to send Ctrl+C
+            bridgeTmux.sendCtrlC(session.tmuxSession)
+                .then(() => {
+                log(`Sent Ctrl+C to ${session.name}`);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true }));
+            })
+                .catch((error) => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: error.message }));
             });
             return;
         }
@@ -2140,7 +2145,7 @@ async function handleHttpRequest(req, res) {
                 }));
                 return;
             }
-            const tmuxSessionName = session.tmuxSession; // TypeScript now knows this is string
+            const tmuxSessionName = session.tmuxSession;
             // Build command based on agent type
             let agentCmd;
             if (session.agent === 'codex') {
@@ -2149,43 +2154,38 @@ async function handleHttpRequest(req, res) {
             else {
                 agentCmd = 'claude --permission-mode=bypassPermissions --dangerously-skip-permissions';
             }
-            // Kill existing tmux session if it exists (ignore errors)
-            execFile('tmux', ['kill-session', '-t', tmuxSessionName], EXEC_OPTIONS, () => {
-                // Two-step approach: create session without command, then send agent command via send-keys
-                execFile('tmux', ['new-session', '-d', '-s', tmuxSessionName, '-c', cwd], EXEC_OPTIONS, (createError) => {
-                    if (createError) {
-                        res.writeHead(500, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ ok: false, error: `Failed to create session: ${createError.message}` }));
-                        return;
+            // Use bridge methods for restart
+            (async () => {
+                try {
+                    // Kill existing tmux session if it exists (ignore errors)
+                    await bridgeTmux.killSession(tmuxSessionName).catch(() => { });
+                    // Create new session with agent command
+                    await bridgeTmux.createSession(tmuxSessionName, { cwd, command: agentCmd });
+                    session.status = 'idle';
+                    session.lastActivity = Date.now();
+                    session.claudeSessionId = undefined;
+                    session.codexThreadId = undefined;
+                    session.currentTool = undefined;
+                    // Clear old linking
+                    for (const [claudeId, managedId] of claudeToManagedMap) {
+                        if (managedId === session.id) {
+                            claudeToManagedMap.delete(claudeId);
+                        }
                     }
-                    // Send the agent command to the session
-                    execFile('tmux', ['send-keys', '-t', tmuxSessionName, agentCmd, 'Enter'], EXEC_OPTIONS, (sendError) => {
-                        if (sendError) {
-                            // Kill the empty session since we couldn't start the agent
-                            exec(`tmux kill-session -t ${tmuxSessionName}`, EXEC_OPTIONS);
-                            res.writeHead(500, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${sendError.message}` }));
-                            return;
-                        }
-                        session.status = 'idle';
-                        session.lastActivity = Date.now();
-                        session.claudeSessionId = undefined;
-                        session.codexThreadId = undefined;
-                        session.currentTool = undefined;
-                        // Clear old linking
-                        for (const [claudeId, managedId] of claudeToManagedMap) {
-                            if (managedId === session.id) {
-                                claudeToManagedMap.delete(claudeId);
-                            }
-                        }
-                        log(`Restarted ${session.agent} session: ${session.name} (${session.id.slice(0, 8)})`);
-                        broadcastSessions();
-                        saveSessions();
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ ok: true, session }));
-                    });
-                });
-            });
+                    log(`Restarted ${session.agent} session: ${session.name} (${session.id.slice(0, 8)})`);
+                    broadcastSessions();
+                    saveSessions();
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: true, session }));
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    // Try to clean up on failure
+                    bridgeTmux.killSession(tmuxSessionName).catch(() => { });
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${message}` }));
+                }
+            })();
             return;
         }
         // POST /sessions/:id/terminal - Open Terminal.app attached to tmux session
@@ -2593,6 +2593,11 @@ function main() {
     loadSessions();
     loadEventsFromFile();
     loadTiles();
+    // Start bridge components (session manager, file watcher, event processor)
+    // This runs in parallel with the existing event processing for now
+    startBridge().catch((err) => {
+        console.error('Failed to start bridge:', err);
+    });
     gitStatusManager.setUpdateHandler(({ sessionId, status }) => {
         const session = managedSessions.get(sessionId);
         if (session) {
@@ -2603,7 +2608,8 @@ function main() {
     gitStatusManager.start();
     // Initialize Codex session watcher (watches ~/.codex/sessions/)
     initCodexWatcher();
-    watchEventsFile();
+    // NOTE: watchEventsFile() has been replaced by bridge's FileWatcher
+    // The bridge is started earlier in main() and handles event file watching
     const httpServer = createServer((req, res) => {
         handleHttpRequest(req, res).catch((e) => {
             console.error('Request error:', e);
@@ -2621,11 +2627,15 @@ function main() {
         }
         clients.add(ws);
         log(`Client connected (${clients.size} total)${origin ? ` from ${origin}` : ''}`);
+        // Send standard 'init' message per WEBSOCKET_INTERFACE.md spec
+        const sessions = getSessions();
+        ws.send(JSON.stringify({ type: 'init', data: { sessions } }));
+        // Also send legacy messages for backward compatibility with existing frontend
         ws.send(JSON.stringify({
             type: 'connected',
             payload: { sessionId: events[events.length - 1]?.sessionId ?? 'unknown' },
         }));
-        ws.send(JSON.stringify({ type: 'sessions', payload: getSessions() }));
+        ws.send(JSON.stringify({ type: 'sessions', data: sessions, payload: sessions }));
         ws.send(JSON.stringify({ type: 'text_tiles', payload: getTiles() }));
         const activeClaudeSessionIds = new Set(Array.from(managedSessions.values())
             .map((s) => s.claudeSessionId)
@@ -2633,7 +2643,7 @@ function main() {
         const filteredHistory = events
             .filter((e) => activeClaudeSessionIds.has(e.sessionId))
             .slice(-50);
-        ws.send(JSON.stringify({ type: 'history', payload: filteredHistory }));
+        ws.send(JSON.stringify({ type: 'history', data: filteredHistory, payload: filteredHistory }));
         ws.on('message', (data, isBinary) => {
             if (isBinary) {
                 const audioBuffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
@@ -2672,13 +2682,13 @@ function main() {
         startPermissionPolling();
         startSuggestionPolling();
         startRalphWiggumPolling();
-        setInterval(checkSessionHealth, 5000);
+        setInterval(() => { checkSessionHealth().catch(e => DEBUG && console.error('Session health check error:', e)); }, 5000);
         setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS);
         setInterval(checkCodexSessionHealth, 30_000); // Check every 30 seconds
-        setInterval(cleanupStaleOfflineSessions, 60_000); // Check every minute
-        checkSessionHealth();
+        setInterval(() => { cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Cleanup error:', e)); }, 60_000); // Check every minute
+        checkSessionHealth().catch(e => DEBUG && console.error('Initial session health check error:', e));
         checkCodexSessionHealth(); // Mark inactive Codex sessions as offline
-        cleanupStaleOfflineSessions(); // Run once at startup
+        cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Initial cleanup error:', e)); // Run once at startup
     });
 }
 main();

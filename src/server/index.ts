@@ -1480,9 +1480,12 @@ function loadSessions(): void {
 }
 
 function broadcastSessions(): void {
+  const sessions = getSessions();
+  // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
   broadcast({
     type: 'sessions',
-    payload: getSessions(),
+    data: sessions,
+    payload: sessions,
   });
 }
 
@@ -1993,7 +1996,8 @@ function addEvent(event: CINEvent): void {
     }
   }
 
-  broadcast({ type: 'event', payload: processed });
+  // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
+  broadcast({ type: 'event', data: processed, payload: processed });
 }
 
 // =============================================================================
@@ -2064,7 +2068,8 @@ function handleClientMessage(ws: WebSocket, message: WSMessage): void {
     case 'get_history': {
       const limit = (message.payload as { limit?: number })?.limit ?? 100;
       const history = events.slice(-limit);
-      ws.send(JSON.stringify({ type: 'history', payload: history }));
+      // Use 'data' per spec, keep 'payload' for backward compatibility
+      ws.send(JSON.stringify({ type: 'history', data: history, payload: history }));
       debug(`Sent ${history.length} historical events`);
       break;
     }
@@ -3024,14 +3029,18 @@ function main(): void {
     clients.add(ws);
     log(`Client connected (${clients.size} total)${origin ? ` from ${origin}` : ''}`);
 
+    // Send standard 'init' message per WEBSOCKET_INTERFACE.md spec
+    const sessions = getSessions();
+    ws.send(JSON.stringify({ type: 'init', data: { sessions } }));
+
+    // Also send legacy messages for backward compatibility with existing frontend
     ws.send(
       JSON.stringify({
         type: 'connected',
         payload: { sessionId: events[events.length - 1]?.sessionId ?? 'unknown' },
       })
     );
-
-    ws.send(JSON.stringify({ type: 'sessions', payload: getSessions() }));
+    ws.send(JSON.stringify({ type: 'sessions', data: sessions, payload: sessions }));
     ws.send(JSON.stringify({ type: 'text_tiles', payload: getTiles() }));
 
     const activeClaudeSessionIds = new Set(
@@ -3042,7 +3051,7 @@ function main(): void {
     const filteredHistory = events
       .filter((e) => activeClaudeSessionIds.has(e.sessionId))
       .slice(-50);
-    ws.send(JSON.stringify({ type: 'history', payload: filteredHistory }));
+    ws.send(JSON.stringify({ type: 'history', data: filteredHistory, payload: filteredHistory }));
 
     ws.on('message', (data, isBinary) => {
       if (isBinary) {
