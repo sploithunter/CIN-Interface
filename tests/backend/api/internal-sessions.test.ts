@@ -6,6 +6,9 @@
 
 import { describe, it, expect, afterAll, beforeAll } from 'vitest';
 import { get, post, del, sleep } from '../../utils';
+import * as fs from 'fs';
+import * as path from 'path';
+import { execSync } from 'child_process';
 
 const SERVER_PORT = 4003;
 const TEST_PREFIX = '__test_internal__';
@@ -309,6 +312,99 @@ describe('Session Restart', () => {
   it('returns 404 for nonexistent session', async () => {
     const res = await post('/sessions/00000000-0000-0000-0000-000000000000/restart', {}, SERVER_PORT);
     expect(res.status).toBe(404);
+  });
+});
+
+describe('Session in Git Repository', () => {
+  // Create temp git repo for testing - use fixed names to avoid conflicts
+  const tempRepoDir = `/tmp/${TEST_PREFIX}git-repo`;
+  const tempNonRepoDir = `/tmp/${TEST_PREFIX}non-repo`;
+
+  beforeAll(async () => {
+    // Create temp directories
+    fs.mkdirSync(tempRepoDir, { recursive: true });
+    fs.mkdirSync(tempNonRepoDir, { recursive: true });
+
+    // Initialize git repo with a commit
+    execSync('git init', { cwd: tempRepoDir });
+    execSync('git config user.email "test@test.com"', { cwd: tempRepoDir });
+    execSync('git config user.name "Test"', { cwd: tempRepoDir });
+    fs.writeFileSync(path.join(tempRepoDir, 'README.md'), '# Test Repo');
+    execSync('git add .', { cwd: tempRepoDir });
+    execSync('git commit -m "Initial commit"', { cwd: tempRepoDir });
+  });
+
+  afterAll(async () => {
+    await cleanupTestSessions();
+    // Clean up temp directories
+    try {
+      fs.rmSync(tempRepoDir, { recursive: true, force: true });
+      fs.rmSync(tempNonRepoDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  it('creates session in a git repository directory', async () => {
+    const res = await post('/sessions', {
+      name: `${TEST_PREFIX}git-repo`,
+      cwd: tempRepoDir,
+      flags: { openTerminal: false }
+    }, SERVER_PORT);
+
+    expect(res.status).toBe(201);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.session.cwd).toBe(tempRepoDir);
+
+    createdSessionIds.push(res.body.session.id);
+  });
+
+  it('detects git status for repository sessions', async () => {
+    const createRes = await post('/sessions', {
+      name: `${TEST_PREFIX}git-status`,
+      cwd: tempRepoDir,
+      flags: { openTerminal: false }
+    }, SERVER_PORT);
+
+    createdSessionIds.push(createRes.body.session.id);
+
+    // Wait for git status polling to populate
+    await sleep(2000);
+
+    // Fetch sessions to get updated git status
+    const sessionsRes = await get('/sessions', SERVER_PORT);
+    const session = sessionsRes.body.sessions.find(
+      (s: any) => s.id === createRes.body.session.id
+    );
+
+    expect(session).toBeDefined();
+    expect(session.gitStatus).toBeDefined();
+    expect(session.gitStatus.isRepo).toBe(true);
+    expect(session.gitStatus.branch).toBeTruthy();
+    expect(typeof session.gitStatus.ahead).toBe('number');
+    expect(typeof session.gitStatus.behind).toBe('number');
+  });
+
+  it('detects non-repo directories correctly', async () => {
+    const res = await post('/sessions', {
+      name: `${TEST_PREFIX}non-repo`,
+      cwd: tempNonRepoDir,
+      flags: { openTerminal: false }
+    }, SERVER_PORT);
+
+    createdSessionIds.push(res.body.session.id);
+
+    // Wait for git status polling
+    await sleep(2000);
+
+    const sessionsRes = await get('/sessions', SERVER_PORT);
+    const session = sessionsRes.body.sessions.find(
+      (s: any) => s.id === res.body.session.id
+    );
+
+    expect(session).toBeDefined();
+    expect(session.gitStatus).toBeDefined();
+    expect(session.gitStatus.isRepo).toBe(false);
   });
 });
 
