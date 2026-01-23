@@ -236,7 +236,7 @@ class TmuxClaudeAdapter implements SessionAdapter {
   }
   
   async createSession(options: CreateSessionOptions): Promise<AdapterSession> {
-    const tmuxSession = `vibecraft-${shortId()}`;
+    const tmuxSession = `cin-${shortId()}`;
     const claudeCmd = this.buildClaudeCommand(options);
     
     await execFileAsync('tmux', [

@@ -1,5 +1,5 @@
 /**
- * Vibecraft Event Types
+ * CIN-Interface Event Types
  *
  * These types define the contract between:
  * - Hook scripts (produce events)
@@ -444,7 +444,7 @@ export interface UpdateTextTileRequest {
 // Configuration
 // ============================================================================
 
-export interface VibecraftConfig {
+export interface CINConfig {
   /** WebSocket server port */
   serverPort: number
   /** Path to events JSONL file */
@@ -455,7 +455,7 @@ export interface VibecraftConfig {
   debug: boolean
 }
 
-export const DEFAULT_CONFIG: VibecraftConfig = {
+export const DEFAULT_CONFIG: CINConfig = {
   serverPort: 4003,
   eventsFile: './data/events.jsonl',
   maxEventsInMemory: 1000,

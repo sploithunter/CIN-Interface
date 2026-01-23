@@ -25,6 +25,12 @@ import { dirname, resolve, join, basename } from 'path'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { homedir } from 'os'
+import {
+  createHookInstaller,
+  setupHooks,
+  uninstallHooks,
+  checkDependencies as bridgeCheckDependencies,
+} from 'coding-agent-bridge'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -61,10 +67,10 @@ function checkHooksConfigured() {
     const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
     const hooks = settings.hooks || {}
     const hasPreToolUse = hooks.PreToolUse?.some(h =>
-      h.hooks?.some(hh => hh.command?.includes('vibecraft-hook'))
+      h.hooks?.some(hh => hh.command?.includes('cin-hook'))
     )
     const hasPostToolUse = hooks.PostToolUse?.some(h =>
-      h.hooks?.some(hh => hh.command?.includes('vibecraft-hook'))
+      h.hooks?.some(hh => hh.command?.includes('cin-hook'))
     )
 
     if (hasPreToolUse && hasPostToolUse) {
@@ -127,8 +133,8 @@ Options:
   --hook-path          Print path to hook script (for manual setup)
 
 Environment Variables:
-  VIBECRAFT_PORT       WebSocket server port (default: 4003)
-  VIBECRAFT_DEBUG      Enable debug logging (true/false)
+  CIN_PORT       WebSocket server port (default: 4003)
+  CIN_DEBUG      Enable debug logging (true/false)
 
 Setup:
   1. Run: cin-interface setup (for Claude Code)
@@ -141,188 +147,71 @@ GitHub:  https://github.com/sploithunter/CIN-Interface
   process.exit(0)
 }
 
-// Hook path command
+// Hook path command - uses bridge's hook script path
 if (args.includes('--hook-path')) {
-  console.log(resolve(ROOT, 'hooks/vibecraft-hook.sh'))
+  const cinDataDir = join(homedir(), '.cin-interface')
+  const installer = createHookInstaller({ dataDir: cinDataDir })
+  console.log(installer.getHookScriptPath())
   process.exit(0)
 }
 
-// Setup command
+// Setup command - uses coding-agent-bridge HookInstaller
 if (args[0] === 'setup') {
-  const { writeFileSync, copyFileSync, chmodSync } = await import('fs')
-
   console.log('Setting up CIN-Interface hooks...\n')
 
-  // ==========================================================================
-  // Step 1: Find Claude Code settings
-  // ==========================================================================
+  // Use bridge's HookInstaller with CIN-Interface data directory
+  const cinDataDir = join(homedir(), '.cin-interface')
+  const installer = createHookInstaller({ dataDir: cinDataDir })
 
-  // Possible locations for Claude settings (in order of preference)
-  const possibleSettingsPaths = [
-    join(homedir(), '.claude', 'settings.json'),           // Standard location
-    join(homedir(), '.config', 'claude', 'settings.json'), // XDG config
-  ]
+  // Check dependencies first
+  const deps = await bridgeCheckDependencies({ dataDir: cinDataDir })
+  let hasWarnings = false
 
-  let settingsPath = null
-  let settingsDir = null
-
-  // Find existing settings file
-  for (const path of possibleSettingsPaths) {
-    if (existsSync(path)) {
-      settingsPath = path
-      settingsDir = dirname(path)
-      break
+  console.log('Checking dependencies...')
+  for (const dep of deps) {
+    if (dep.available) {
+      console.log(`  ✓ ${dep.name}${dep.version ? ` (${dep.version})` : ''}`)
+    } else {
+      hasWarnings = true
+      console.log(`  ✗ ${dep.name} not found`)
     }
   }
 
-  // If no settings file found, use default location
-  if (!settingsPath) {
-    settingsPath = possibleSettingsPaths[0]
-    settingsDir = dirname(settingsPath)
+  if (!deps.find(d => d.name === 'jq')?.available) {
+    console.log('    Install: brew install jq (macOS) or apt install jq (Linux)')
+  }
+  if (!deps.find(d => d.name === 'tmux')?.available) {
+    console.log('    Install: brew install tmux (macOS) or apt install tmux (Linux)')
   }
 
-  console.log(`Claude settings: ${settingsPath}`)
+  // Install hooks using bridge
+  console.log('\nInstalling hooks...')
+  const results = await setupHooks({ dataDir: cinDataDir })
 
-  // ==========================================================================
-  // Step 2: Install hook script to ~/.vibecraft/hooks/
-  // ==========================================================================
-
-  const vibecraftHooksDir = join(homedir(), '.vibecraft', 'hooks')
-  const installedHookPath = join(vibecraftHooksDir, 'vibecraft-hook.sh')
-  const sourceHookPath = resolve(ROOT, 'hooks/vibecraft-hook.sh')
-
-  // Ensure hooks directory exists
-  if (!existsSync(vibecraftHooksDir)) {
-    mkdirSync(vibecraftHooksDir, { recursive: true })
-    console.log(`Created ${vibecraftHooksDir}`)
-  }
-
-  // Copy hook script
-  if (!existsSync(sourceHookPath)) {
-    console.error(`ERROR: Hook script not found at ${sourceHookPath}`)
-    console.error('This is a bug - please report it.')
-    process.exit(1)
-  }
-
-  try {
-    copyFileSync(sourceHookPath, installedHookPath)
-    chmodSync(installedHookPath, 0o755) // Make executable
-    console.log(`Installed hook: ${installedHookPath}`)
-  } catch (e) {
-    console.error(`ERROR: Failed to install hook script: ${e.message}`)
-    process.exit(1)
-  }
-
-  // ==========================================================================
-  // Step 3: Ensure data directory exists
-  // ==========================================================================
-
-  const dataDir = join(homedir(), '.vibecraft', 'data')
-  if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true })
-    console.log(`Created ${dataDir}`)
-  }
-
-  // ==========================================================================
-  // Step 4: Configure Claude Code settings
-  // ==========================================================================
-
-  // Ensure settings directory exists
-  if (!existsSync(settingsDir)) {
-    mkdirSync(settingsDir, { recursive: true })
-    console.log(`Created ${settingsDir}`)
-  }
-
-  // Load or create settings
-  let settings = {}
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      // Backup existing settings
-      const backupPath = `${settingsPath}.backup-${Date.now()}`
-      writeFileSync(backupPath, JSON.stringify(settings, null, 2))
-      console.log(`Backed up settings: ${backupPath}`)
-    } catch (e) {
-      console.error(`ERROR: Failed to parse ${settingsPath}: ${e.message}`)
-      console.error('Please fix the JSON syntax and try again.')
-      process.exit(1)
+  // Report results
+  let allSuccess = true
+  for (const result of results) {
+    if (result.success) {
+      console.log(`  ✓ ${result.message}`)
+    } else {
+      console.log(`  ✗ ${result.message}`)
+      allSuccess = false
     }
   }
 
-  // Hook configurations - use installed path (stable location)
-  const toolHookEntry = {
-    matcher: '*',
-    hooks: [{ type: 'command', command: installedHookPath, timeout: 5 }]
-  }
-  const genericHookEntry = {
-    hooks: [{ type: 'command', command: installedHookPath, timeout: 5 }]
-  }
-
-  // Initialize hooks object
-  settings.hooks = settings.hooks || {}
-
-  // Helper to add/update hooks (removes old vibecraft hooks first)
-  const addHook = (eventType, entry) => {
-    settings.hooks[eventType] = settings.hooks[eventType] || []
-    // Remove any existing vibecraft hooks (from any location)
-    settings.hooks[eventType] = settings.hooks[eventType].filter(h =>
-      !h.hooks?.some(hh => hh.command?.includes('vibecraft-hook'))
-    )
-    // Add new hook
-    settings.hooks[eventType].push(entry)
-  }
-
-  // Configure ALL hooks
-  addHook('PreToolUse', toolHookEntry)
-  addHook('PostToolUse', toolHookEntry)
-  addHook('Stop', genericHookEntry)
-  addHook('SubagentStop', genericHookEntry)
-  addHook('SessionStart', genericHookEntry)
-  addHook('SessionEnd', genericHookEntry)
-  addHook('UserPromptSubmit', genericHookEntry)
-  addHook('Notification', genericHookEntry)
-
-  // Write settings
-  try {
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
-    console.log(`Updated settings: ${settingsPath}`)
-  } catch (e) {
-    console.error(`ERROR: Failed to write settings: ${e.message}`)
-    process.exit(1)
-  }
-
-  // ==========================================================================
-  // Step 5: Verify and report
-  // ==========================================================================
+  // Show hook script location
+  console.log(`\nHook script: ${installer.getHookScriptPath()}`)
+  console.log(`Events file: ${installer.getEventsFilePath()}`)
 
   console.log('\n' + '='.repeat(50))
-  console.log('Setup complete!')
+  console.log(allSuccess ? 'Setup complete!' : 'Setup completed with warnings')
   console.log('='.repeat(50))
 
   console.log('\nHooks configured:')
-  console.log('  - PreToolUse')
-  console.log('  - PostToolUse')
-  console.log('  - Stop')
-  console.log('  - SubagentStop')
-  console.log('  - SessionStart')
-  console.log('  - SessionEnd')
-  console.log('  - UserPromptSubmit')
-  console.log('  - Notification')
-
-  // Check dependencies
-  let hasWarnings = false
-
-  if (!checkJq()) {
-    hasWarnings = true
-    console.log('\n[!] Warning: jq not found')
-    console.log('    Install: brew install jq (macOS) or apt install jq (Linux)')
-  }
-
-  if (!checkTmux()) {
-    hasWarnings = true
-    console.log('\n[!] Warning: tmux not found')
-    console.log('    Install: brew install tmux (macOS) or apt install tmux (Linux)')
-  }
+  console.log('  - PreToolUse, PostToolUse')
+  console.log('  - Stop, SubagentStop')
+  console.log('  - SessionStart, SessionEnd')
+  console.log('  - UserPromptSubmit, Notification')
 
   if (!hasWarnings) {
     console.log('\nAll dependencies found!')
@@ -354,123 +243,34 @@ if (args[0] === 'setup') {
   process.exit(0)
 }
 
-// Setup Codex command - configure Codex CLI notify hook
+// Setup Codex command - uses coding-agent-bridge HookInstaller for Codex only
 if (args[0] === 'setup-codex') {
-  const { writeFileSync, copyFileSync, chmodSync } = await import('fs')
-
   console.log('Setting up CIN-Interface Codex integration...\n')
 
-  // ==========================================================================
-  // Step 1: Install Codex hook script to ~/.vibecraft/hooks/
-  // ==========================================================================
+  // Use bridge's HookInstaller with CIN-Interface data directory
+  const cinDataDir = join(homedir(), '.cin-interface')
+  const installer = createHookInstaller({ dataDir: cinDataDir })
 
-  const vibecraftHooksDir = join(homedir(), '.vibecraft', 'hooks')
-  const installedHookPath = join(vibecraftHooksDir, 'codex-hook.sh')
-  const sourceHookPath = resolve(ROOT, 'hooks/codex-hook.sh')
+  // Install Codex hooks only
+  console.log('Installing Codex hooks...')
+  const result = await installer.install('codex')
 
-  // Ensure hooks directory exists
-  if (!existsSync(vibecraftHooksDir)) {
-    mkdirSync(vibecraftHooksDir, { recursive: true })
-    console.log(`Created ${vibecraftHooksDir}`)
-  }
-
-  // Copy hook script
-  if (!existsSync(sourceHookPath)) {
-    console.error(`ERROR: Codex hook script not found at ${sourceHookPath}`)
-    console.error('This is a bug - please report it.')
-    process.exit(1)
-  }
-
-  try {
-    copyFileSync(sourceHookPath, installedHookPath)
-    chmodSync(installedHookPath, 0o755) // Make executable
-    console.log(`Installed hook: ${installedHookPath}`)
-  } catch (e) {
-    console.error(`ERROR: Failed to install hook script: ${e.message}`)
-    process.exit(1)
-  }
-
-  // ==========================================================================
-  // Step 2: Configure ~/.codex/config.toml
-  // ==========================================================================
-
-  const codexConfigDir = join(homedir(), '.codex')
-  const codexConfigPath = join(codexConfigDir, 'config.toml')
-
-  // Ensure .codex directory exists
-  if (!existsSync(codexConfigDir)) {
-    mkdirSync(codexConfigDir, { recursive: true })
-    console.log(`Created ${codexConfigDir}`)
-  }
-
-  // Read existing config or create new
-  let configContent = ''
-  if (existsSync(codexConfigPath)) {
-    configContent = readFileSync(codexConfigPath, 'utf-8')
-    // Backup existing config
-    const backupPath = `${codexConfigPath}.backup-${Date.now()}`
-    writeFileSync(backupPath, configContent)
-    console.log(`Backed up config: ${backupPath}`)
-  }
-
-  // Check if notify is already configured
-  const notifyLineRegex = /^notify\s*=\s*\[/m
-  const hasNotify = notifyLineRegex.test(configContent)
-
-  if (hasNotify) {
-    // Check if our hook is already in the notify array
-    if (configContent.includes('codex-hook.sh')) {
-      console.log('Codex notify hook already configured!')
-    } else {
-      // Need to add our hook to existing notify array
-      // This is complex - for now, warn user to add manually
-      console.log('\n[!] Existing notify configuration found.')
-      console.log('    Please add the following to your notify array in ~/.codex/config.toml:')
-      console.log(`    "${installedHookPath}"`)
-      console.log('\nExample:')
-      console.log('  notify = ["existing-hook", "' + installedHookPath + '"]')
-    }
+  if (result.success) {
+    console.log(`  ✓ ${result.message}`)
   } else {
-    // Add notify configuration
-    const notifyConfig = `\n# CIN-Interface Codex integration\nnotify = ["${installedHookPath}"]\n`
-
-    // Append to config
-    writeFileSync(codexConfigPath, configContent + notifyConfig)
-    console.log(`Updated config: ${codexConfigPath}`)
+    console.log(`  ✗ ${result.message}`)
+    process.exit(1)
   }
 
-  // ==========================================================================
-  // Step 3: Ensure data directory exists
-  // ==========================================================================
-
-  const dataDir = join(homedir(), '.vibecraft', 'data')
-  if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true })
-    console.log(`Created ${dataDir}`)
-  }
-
-  // ==========================================================================
-  // Step 4: Verify and report
-  // ==========================================================================
+  console.log(`\nHook script: ${installer.getHookScriptPath()}`)
+  console.log(`Events file: ${installer.getEventsFilePath()}`)
 
   console.log('\n' + '='.repeat(50))
   console.log('Codex setup complete!')
   console.log('='.repeat(50))
 
-  console.log('\nIntegration details:')
-  console.log(`  - Hook script: ${installedHookPath}`)
-  console.log(`  - Config file: ${codexConfigPath}`)
-
-  // Check dependencies
-  let hasWarnings = false
-
-  if (!checkJq()) {
-    hasWarnings = true
-    console.log('\n[!] Warning: jq not found')
-    console.log('    Install: brew install jq (macOS) or apt install jq (Linux)')
-  }
-
   // Check if Codex CLI is installed
+  let hasWarnings = false
   try {
     execSync('which codex', { stdio: 'ignore' })
     console.log('\n✓ Codex CLI found')
@@ -478,6 +278,13 @@ if (args[0] === 'setup-codex') {
     hasWarnings = true
     console.log('\n[!] Warning: codex CLI not found in PATH')
     console.log('    Make sure OpenAI Codex CLI is installed')
+  }
+
+  // Check jq
+  if (!checkJq()) {
+    hasWarnings = true
+    console.log('\n[!] Warning: jq not found')
+    console.log('    Install: brew install jq (macOS) or apt install jq (Linux)')
   }
 
   if (!hasWarnings) {
@@ -497,176 +304,60 @@ if (args[0] === 'setup-codex') {
   process.exit(0)
 }
 
-// Uninstall command
+// Uninstall command - uses coding-agent-bridge HookInstaller
 if (args[0] === 'uninstall') {
-  const { writeFileSync, rmSync } = await import('fs')
+  const { rmSync, readdirSync } = await import('fs')
 
   console.log('Uninstalling CIN-Interface hooks...\n')
 
-  // ==========================================================================
-  // Step 1: Find Claude Code settings
-  // ==========================================================================
+  // Use bridge's HookInstaller with CIN-Interface data directory
+  const cinDataDir = join(homedir(), '.cin-interface')
 
-  const possibleSettingsPaths = [
-    join(homedir(), '.claude', 'settings.json'),
-    join(homedir(), '.config', 'claude', 'settings.json'),
-  ]
+  // Uninstall hooks using bridge
+  console.log('Removing hooks from agent settings...')
+  const results = await uninstallHooks({ dataDir: cinDataDir })
 
-  let settingsPath = null
-  for (const path of possibleSettingsPaths) {
-    if (existsSync(path)) {
-      settingsPath = path
-      break
+  for (const result of results) {
+    if (result.success) {
+      console.log(`  ✓ ${result.message}`)
+    } else {
+      console.log(`  ⚠ ${result.message}`)
     }
   }
 
-  if (!settingsPath) {
-    console.log('No Claude settings file found - nothing to uninstall.')
-    process.exit(0)
-  }
-
-  console.log(`Claude settings: ${settingsPath}`)
-
-  // ==========================================================================
-  // Step 2: Remove vibecraft hooks from settings
-  // ==========================================================================
-
-  let settings
-  try {
-    settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-  } catch (e) {
-    console.error(`ERROR: Failed to parse ${settingsPath}: ${e.message}`)
-    process.exit(1)
-  }
-
-  if (!settings.hooks) {
-    console.log('No hooks configured - nothing to uninstall.')
-    process.exit(0)
-  }
-
-  // Backup before modifying
-  const backupPath = `${settingsPath}.backup-${Date.now()}`
-  writeFileSync(backupPath, JSON.stringify(settings, null, 2))
-  console.log(`Backed up settings: ${backupPath}`)
-
-  // Remove vibecraft hooks from each event type
-  const hookTypes = [
-    'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop',
-    'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Notification'
-  ]
-
-  let removedCount = 0
-  for (const hookType of hookTypes) {
-    if (!settings.hooks[hookType]) continue
-
-    const before = settings.hooks[hookType].length
-    settings.hooks[hookType] = settings.hooks[hookType].filter(h =>
-      !h.hooks?.some(hh => hh.command?.includes('vibecraft-hook'))
-    )
-    const after = settings.hooks[hookType].length
-
-    if (before !== after) {
-      removedCount += (before - after)
-      console.log(`  Removed vibecraft hook from ${hookType}`)
-    }
-
-    // Clean up empty arrays
-    if (settings.hooks[hookType].length === 0) {
-      delete settings.hooks[hookType]
-    }
-  }
-
-  // Clean up empty hooks object
-  if (Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks
-  }
-
-  if (removedCount === 0) {
-    console.log('No vibecraft hooks found - nothing to remove.')
-  } else {
-    // Write updated settings
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
-    console.log(`\nRemoved ${removedCount} hook(s) from settings.`)
-  }
-
-  // ==========================================================================
-  // Step 3: Remove hook scripts (but keep data)
-  // ==========================================================================
-
-  const hookScript = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook.sh')
-  if (existsSync(hookScript)) {
-    rmSync(hookScript)
-    console.log(`Removed: ${hookScript}`)
-  }
-
-  // Also remove Codex hook
-  const codexHookScript = join(homedir(), '.vibecraft', 'hooks', 'codex-hook.sh')
-  if (existsSync(codexHookScript)) {
-    rmSync(codexHookScript)
-    console.log(`Removed: ${codexHookScript}`)
-  }
-
-  // Remove hooks directory if empty
-  const hooksDir = join(homedir(), '.vibecraft', 'hooks')
+  // Remove hook scripts (but keep data)
+  const hooksDir = join(cinDataDir, 'hooks')
   if (existsSync(hooksDir)) {
     try {
-      const { readdirSync } = await import('fs')
+      const files = readdirSync(hooksDir)
+      for (const file of files) {
+        rmSync(join(hooksDir, file))
+        console.log(`  Removed: ${join(hooksDir, file)}`)
+      }
+      // Remove hooks directory if empty
       if (readdirSync(hooksDir).length === 0) {
         rmSync(hooksDir, { recursive: true })
-        console.log(`Removed empty directory: ${hooksDir}`)
-      }
-    } catch {}
-  }
-
-  // ==========================================================================
-  // Step 4: Remove Codex notify config
-  // ==========================================================================
-
-  const codexConfigPath = join(homedir(), '.codex', 'config.toml')
-  if (existsSync(codexConfigPath)) {
-    try {
-      let configContent = readFileSync(codexConfigPath, 'utf-8')
-      if (configContent.includes('codex-hook.sh')) {
-        // Backup before modifying
-        const codexBackupPath = `${codexConfigPath}.backup-${Date.now()}`
-        writeFileSync(codexBackupPath, configContent)
-        console.log(`Backed up Codex config: ${codexBackupPath}`)
-
-        // Remove the notify line containing our hook
-        const lines = configContent.split('\n')
-        const filteredLines = lines.filter(line => {
-          // Remove CIN-Interface comment and notify line with our hook
-          if (line.includes('# CIN-Interface Codex integration')) return false
-          if (line.includes('notify') && line.includes('codex-hook.sh')) return false
-          return true
-        })
-        configContent = filteredLines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n'
-        writeFileSync(codexConfigPath, configContent)
-        console.log(`Removed notify config from: ${codexConfigPath}`)
+        console.log(`  Removed empty directory: ${hooksDir}`)
       }
     } catch (e) {
-      console.log(`  Warning: Could not modify Codex config: ${e.message}`)
+      console.log(`  Warning: Could not clean up hooks directory: ${e.message}`)
     }
   }
-
-  // ==========================================================================
-  // Done
-  // ==========================================================================
 
   console.log('\n' + '='.repeat(50))
   console.log('Uninstall complete!')
   console.log('='.repeat(50))
 
   console.log('\nCIN-Interface hooks have been removed.')
-  console.log('Your data is preserved in ~/.vibecraft/data/')
+  console.log('Your data is preserved in ~/.cin-interface/data/')
   console.log('\nTo remove all data:')
-  console.log('  rm -rf ~/.vibecraft')
+  console.log('  rm -rf ~/.cin-interface')
   console.log('\nRestart Claude Code and Codex CLI for changes to take effect.\n')
 
   process.exit(0)
 }
 
-// Doctor command - diagnose common issues
+// Doctor command - diagnose common issues (uses coding-agent-bridge for dependency/hook checks)
 if (args[0] === 'doctor') {
   console.log('='.repeat(50))
   console.log('CIN-Interface Doctor - Diagnosing your setup...')
@@ -676,12 +367,16 @@ if (args[0] === 'doctor') {
   let issues = []
   let warnings = []
 
-  // -------------------------------------------------------------------------
-  // 1. Check dependencies
-  // -------------------------------------------------------------------------
-  console.log('[1/6] Checking dependencies...')
+  // Use bridge's HookInstaller with CIN-Interface data directory
+  const cinDataDir = join(homedir(), '.cin-interface')
+  const installer = createHookInstaller({ dataDir: cinDataDir })
 
-  // Node version
+  // -------------------------------------------------------------------------
+  // 1. Check dependencies (using bridge)
+  // -------------------------------------------------------------------------
+  console.log('[1/5] Checking dependencies...')
+
+  // Node version (CIN-specific)
   const nodeVersion = process.version
   const nodeMajor = parseInt(nodeVersion.slice(1).split('.')[0])
   if (nodeMajor >= 18) {
@@ -691,182 +386,69 @@ if (args[0] === 'doctor') {
     issues.push('Node.js 18+ required')
   }
 
-  // jq
-  if (checkJq()) {
-    try {
-      const jqVersion = execSync('jq --version 2>&1', { encoding: 'utf-8' }).trim()
-      console.log(`  ✓ jq (${jqVersion})`)
-    } catch {
-      console.log('  ✓ jq')
+  // Use bridge's checkDependencies
+  const deps = await bridgeCheckDependencies({ dataDir: cinDataDir })
+  for (const dep of deps) {
+    if (dep.available) {
+      console.log(`  ✓ ${dep.name}${dep.version ? ` (${dep.version})` : ''}`)
+    } else if (dep.name === 'tmux') {
+      console.log(`  ⚠ ${dep.name} not found (optional - needed for browser prompts)`)
+      warnings.push('tmux not installed - browser prompt feature won\'t work')
+    } else {
+      console.log(`  ✗ ${dep.name} not found`)
+      issues.push(`${dep.name} not installed - hooks will not work`)
     }
-  } else {
-    console.log('  ✗ jq not found')
-    issues.push('jq not installed - hooks will not work')
-  }
-
-  // tmux
-  if (checkTmux()) {
-    try {
-      const tmuxVersion = execSync('tmux -V 2>&1', { encoding: 'utf-8' }).trim()
-      console.log(`  ✓ tmux (${tmuxVersion})`)
-    } catch {
-      console.log('  ✓ tmux')
-    }
-  } else {
-    console.log('  ⚠ tmux not found (optional - needed for browser prompts)')
-    warnings.push('tmux not installed - browser prompt feature won\'t work')
-  }
-
-  // curl
-  try {
-    execSync('which curl', { stdio: 'ignore' })
-    console.log('  ✓ curl')
-  } catch {
-    console.log('  ✗ curl not found')
-    issues.push('curl not installed - hooks cannot send events to server')
   }
 
   // -------------------------------------------------------------------------
-  // 2. Check hook script
+  // 2. Check hook installation status (using bridge)
   // -------------------------------------------------------------------------
-  console.log('\n[2/6] Checking hook script...')
+  console.log('\n[2/5] Checking hook installation...')
 
-  const hookScript = join(homedir(), '.vibecraft', 'hooks', 'vibecraft-hook.sh')
-  if (existsSync(hookScript)) {
-    console.log(`  ✓ Hook script exists: ${hookScript}`)
+  // Check hook script
+  const hookScriptPath = installer.getHookScriptPath()
+  if (existsSync(hookScriptPath)) {
+    console.log(`  ✓ Hook script exists: ${hookScriptPath}`)
 
     // Check if executable
     try {
       const { accessSync, constants } = await import('fs')
-      accessSync(hookScript, constants.X_OK)
+      accessSync(hookScriptPath, constants.X_OK)
       console.log('  ✓ Hook script is executable')
     } catch {
       console.log('  ✗ Hook script is not executable')
-      issues.push(`Hook script not executable. Run: chmod +x ${hookScript}`)
+      issues.push(`Hook script not executable. Run: chmod +x ${hookScriptPath}`)
     }
   } else {
-    console.log(`  ✗ Hook script not found: ${hookScript}`)
+    console.log(`  ✗ Hook script not found: ${hookScriptPath}`)
     issues.push('Hook script not installed. Run: npx cin-interface setup')
   }
 
-  // -------------------------------------------------------------------------
-  // 3. Check Claude settings
-  // -------------------------------------------------------------------------
-  console.log('\n[3/6] Checking Claude Code settings...')
-
-  const settingsPaths = [
-    join(homedir(), '.claude', 'settings.json'),
-    join(homedir(), '.config', 'claude', 'settings.json'),
-  ]
-
-  let settingsPath = null
-  for (const p of settingsPaths) {
-    if (existsSync(p)) {
-      settingsPath = p
-      break
-    }
-  }
-
-  if (!settingsPath) {
-    console.log('  ✗ No Claude settings file found')
-    issues.push('Claude settings not found. Run: npx cin-interface setup')
-  } else {
-    console.log(`  ✓ Settings file: ${settingsPath}`)
-
-    try {
-      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      const hooks = settings.hooks || {}
-
-      const hookTypes = ['PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop',
-                         'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Notification']
-
-      let configuredHooks = []
-      let missingHooks = []
-
-      for (const hookType of hookTypes) {
-        const hasVibecraft = hooks[hookType]?.some(h =>
-          h.hooks?.some(hh => hh.command?.includes('vibecraft-hook'))
-        )
-        if (hasVibecraft) {
-          configuredHooks.push(hookType)
-        } else {
-          missingHooks.push(hookType)
-        }
-      }
-
-      if (configuredHooks.length === hookTypes.length) {
-        console.log(`  ✓ All ${hookTypes.length} hooks configured`)
-      } else if (configuredHooks.length > 0) {
-        console.log(`  ⚠ ${configuredHooks.length}/${hookTypes.length} hooks configured`)
-        console.log(`    Missing: ${missingHooks.join(', ')}`)
-        warnings.push(`Some hooks not configured: ${missingHooks.join(', ')}`)
-      } else {
-        console.log('  ✗ No vibecraft hooks configured')
-        issues.push('Hooks not configured. Run: npx cin-interface setup')
-      }
-    } catch (e) {
-      console.log(`  ✗ Failed to parse settings: ${e.message}`)
-      issues.push('Claude settings file has invalid JSON')
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // 3b. Check Codex configuration (optional)
-  // -------------------------------------------------------------------------
-  console.log('\n[3b/6] Checking Codex CLI configuration (optional)...')
-
-  const codexConfigPath = join(homedir(), '.codex', 'config.toml')
-  const codexHookPath = join(homedir(), '.vibecraft', 'hooks', 'codex-hook.sh')
-
-  // Check if Codex CLI is installed
-  let codexInstalled = false
-  try {
-    execSync('which codex', { stdio: 'ignore' })
-    codexInstalled = true
-    console.log('  ✓ Codex CLI found')
-  } catch {
-    console.log('  - Codex CLI not installed (optional)')
-  }
-
-  if (codexInstalled) {
-    // Check Codex hook script
-    if (existsSync(codexHookPath)) {
-      console.log(`  ✓ Codex hook script installed`)
+  // Use bridge's getStatus for agent-specific checks
+  const status = await installer.getStatus()
+  for (const s of status) {
+    const agentName = s.agent === 'claude' ? 'Claude Code' : 'Codex CLI'
+    if (s.installed) {
+      console.log(`  ✓ ${agentName} hooks configured`)
+    } else if (s.settingsExists) {
+      console.log(`  ⚠ ${agentName} settings found but hooks not configured`)
+      warnings.push(`${agentName} hooks not configured. Run: npx cin-interface setup`)
     } else {
-      console.log('  ⚠ Codex hook not installed')
-      warnings.push('Codex hook not installed. Run: npx cin-interface setup-codex')
-    }
-
-    // Check Codex config
-    if (existsSync(codexConfigPath)) {
-      try {
-        const configContent = readFileSync(codexConfigPath, 'utf-8')
-        if (configContent.includes('codex-hook.sh')) {
-          console.log('  ✓ Codex notify configured')
-        } else {
-          console.log('  ⚠ Codex notify not configured')
-          warnings.push('Codex notify not configured. Run: npx cin-interface setup-codex')
-        }
-      } catch (e) {
-        console.log(`  ⚠ Could not read Codex config: ${e.message}`)
-      }
-    } else {
-      console.log('  ⚠ No Codex config file found')
-      warnings.push('Codex not configured. Run: npx cin-interface setup-codex')
+      console.log(`  - ${agentName} not detected (optional)`)
     }
   }
 
   // -------------------------------------------------------------------------
-  // 4. Check data directory
+  // 3. Check data directory (CIN-specific)
   // -------------------------------------------------------------------------
-  console.log('\n[4/6] Checking data directory...')
+  console.log('\n[3/5] Checking data directory...')
 
-  const dataDir = join(homedir(), '.vibecraft', 'data')
+  const dataDir = join(cinDataDir, 'data')
   if (existsSync(dataDir)) {
     console.log(`  ✓ Data directory exists: ${dataDir}`)
 
     // Check events file
-    const eventsFile = join(dataDir, 'events.jsonl')
+    const eventsFile = installer.getEventsFilePath()
     if (existsSync(eventsFile)) {
       const { statSync } = await import('fs')
       const stats = statSync(eventsFile)
@@ -893,9 +475,9 @@ if (args[0] === 'doctor') {
   }
 
   // -------------------------------------------------------------------------
-  // 5. Check server status
+  // 4. Check server status (CIN-specific)
   // -------------------------------------------------------------------------
-  console.log('\n[5/6] Checking server status...')
+  console.log('\n[4/5] Checking server status...')
 
   try {
     const healthRes = execSync('curl -s http://localhost:4003/health', {
@@ -915,9 +497,9 @@ if (args[0] === 'doctor') {
   }
 
   // -------------------------------------------------------------------------
-  // 6. Check tmux sessions
+  // 5. Check tmux sessions (CIN-specific)
   // -------------------------------------------------------------------------
-  console.log('\n[6/6] Checking tmux sessions...')
+  console.log('\n[5/5] Checking tmux sessions...')
 
   if (checkTmux()) {
     try {
@@ -976,7 +558,7 @@ if (args.includes('--version') || args.includes('-v')) {
 }
 
 // Parse port from args
-let port = process.env.VIBECRAFT_PORT || '4003'
+let port = process.env.CIN_PORT || '4003'
 const portIdx = args.findIndex(a => a === '--port' || a === '-p')
 if (portIdx !== -1 && args[portIdx + 1]) {
   port = args[portIdx + 1]
@@ -1016,7 +598,7 @@ if (existsSync(compiledPath)) {
     cwd: ROOT,
     env: {
       ...process.env,
-      VIBECRAFT_PORT: port,
+      CIN_PORT: port,
     },
     stdio: 'inherit',
   })
@@ -1027,7 +609,7 @@ if (existsSync(compiledPath)) {
     cwd: ROOT,
     env: {
       ...process.env,
-      VIBECRAFT_PORT: port,
+      CIN_PORT: port,
     },
     stdio: 'inherit',
   })

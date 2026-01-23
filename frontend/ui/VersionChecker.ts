@@ -2,7 +2,7 @@
  * VersionChecker - Checks for updates and shows a banner if outdated
  *
  * Compares the local server version (from /health) with the latest version
- * (from version.json on vibecraft.sh). Shows a non-intrusive banner if
+ * (from version.json on cin-interface.local). Shows a non-intrusive banner if
  * an update is available.
  */
 
@@ -77,7 +77,7 @@ export async function checkForUpdates(): Promise<void> {
 
     // Get latest version info from static site
     // In dev, this will be from the local server
-    // In production, it comes from vibecraft.sh
+    // In production, it comes from the local server
     const versionRes = await fetch('/version.json')
     if (!versionRes.ok) {
       console.log('[VersionChecker] Could not fetch version.json')

@@ -19,12 +19,10 @@
   ],
   "type": "module",
   "bin": {
-    "cin-interface": "./bin/cli.js",
-    "vibecraft": "./bin/cli.js"
+    "cin-interface": "./bin/cli.js"
   },
   "files": [
     "bin/",
-    "hooks/",
     "dist/",
     "!dist/**/*.map",
     "data/.gitkeep"
@@ -49,7 +47,7 @@
   },
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
-    "chokidar": "^4.0.0",
+    "coding-agent-bridge": "file:../coding-agent-bridge",
     "three": "^0.170.0",
     "tone": "^15.1.22"
   },

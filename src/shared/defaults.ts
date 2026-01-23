@@ -14,17 +14,17 @@ export const DEFAULTS = {
 
   /**
    * Events file path.
-   * Uses ~/.vibecraft/ to ensure consistent location regardless of
+   * Uses ~/.cin-interface/ to ensure consistent location regardless of
    * how the app was installed (npx, global npm, local dev).
    * The ~ is expanded by the server at runtime.
    */
-  EVENTS_FILE: '~/.vibecraft/data/events.jsonl',
+  EVENTS_FILE: '~/.cin-interface/data/events.jsonl',
 
   /**
    * Sessions file path.
-   * Uses ~/.vibecraft/ for consistency across installations.
+   * Uses ~/.cin-interface/ for consistency across installations.
    */
-  SESSIONS_FILE: '~/.vibecraft/data/sessions.json',
+  SESSIONS_FILE: '~/.cin-interface/data/sessions.json',
 
   /** Max events to keep in memory */
   MAX_EVENTS: 1000,

@@ -145,7 +145,7 @@ interface CodexEvent {
   };
 }
 
-function mapCodexToCIN(codexEvent: CodexEvent, sessionId: string, cwd: string): VibecraftEvent {
+function mapCodexToCIN(codexEvent: CodexEvent, sessionId: string, cwd: string): CINEvent {
   const base = {
     id: crypto.randomUUID(),
     timestamp: Date.now(),
@@ -174,7 +174,7 @@ function mapCodexToCIN(codexEvent: CodexEvent, sessionId: string, cwd: string): 
   }
 }
 
-function mapItemEvent(item: CodexEvent['item'], base: object): VibecraftEvent {
+function mapItemEvent(item: CodexEvent['item'], base: object): CINEvent {
   if (!item) return { ...base, type: 'unknown' };
 
   switch (item.type) {
@@ -270,13 +270,13 @@ src/
     └── types.ts                   # Add: agent field, Codex event types
 
 hooks/
-├── vibecraft-hook.sh              # Existing Claude Code hook
+├── cin-hook.sh              # Existing Claude Code hook
 └── codex-hook.sh                  # New: Codex notify hook
 ```
 
 ## Configuration
 
-### New config options in `~/.vibecraft/config.json`:
+### New config options in `~/.cin-interface/config.json`:
 
 ```json
 {

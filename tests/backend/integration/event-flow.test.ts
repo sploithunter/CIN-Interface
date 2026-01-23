@@ -15,7 +15,7 @@ import { waitForOpen, waitForEventById, waitForMessageType, drainMessages, get, 
 
 const WS_URL = 'ws://localhost:4003';
 const SERVER_PORT = 4003;
-const EVENTS_FILE = join(homedir(), '.vibecraft/data/events.jsonl');
+const EVENTS_FILE = join(homedir(), '.cin-interface/data/events.jsonl');
 
 // Test session prefix for cleanup
 const TEST_PREFIX = '__test_integration__';
@@ -62,7 +62,7 @@ describe('Event Flow Integration', () => {
     await drainMessages(ws, 4);
 
     // Ensure events directory exists
-    const eventsDir = join(homedir(), '.vibecraft/data');
+    const eventsDir = join(homedir(), '.cin-interface/data');
     if (!existsSync(eventsDir)) {
       mkdirSync(eventsDir, { recursive: true });
     }

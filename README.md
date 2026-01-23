@@ -2,7 +2,7 @@
 
 3D visualization interface for AI coding agents. Watch and manage Claude Code and OpenAI Codex sessions in real-time.
 
-> **Note**: This is a fork of [Vibecraft](https://vibecraft.sh) by Elysian Labs. Data is stored in `~/.vibecraft/` for backward compatibility.
+> **Note**: This is a fork of [Vibecraft](https://vibecraft.sh) by Elysian Labs. Data is stored in `~/.cin-interface/`.
 
 ![Three.js](https://img.shields.io/badge/Three.js-black?logo=threedotjs) ![TypeScript](https://img.shields.io/badge/TypeScript-blue?logo=typescript&logoColor=white) ![Vitest](https://img.shields.io/badge/Vitest-green?logo=vitest&logoColor=white)
 
@@ -117,7 +117,7 @@ Local Server
 
     ▲                              ▲
     │                              │
-hooks/vibecraft-hook.sh      File Watcher
+hooks/cin-hook.sh            File Watcher
     ▲                              ▲
     │                              │
 Claude Code                  Codex CLI

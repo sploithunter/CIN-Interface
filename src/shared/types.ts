@@ -5,10 +5,55 @@
  * - Hook scripts (produce events)
  * - WebSocket server (relay events)
  * - Three.js client (consume events)
+ *
+ * Base event and session types are imported from coding-agent-bridge.
+ * CIN-specific types (tiles, projects, git status, 3D visualization) are defined here.
  */
 
 // =============================================================================
-// Tool-to-Station Mapping
+// Re-export base types from coding-agent-bridge
+// =============================================================================
+
+export type {
+  // Agent types
+  AgentType,
+
+  // Session types
+  SessionStatus,
+  SessionType,
+  TerminalInfo,
+  Session,
+  SessionFilter,
+
+  // Event types
+  EventType,
+  BaseEvent,
+  PreToolUseEvent,
+  PostToolUseEvent,
+  StopEvent,
+  SubagentStopEvent,
+  SessionStartEvent,
+  SessionEndEvent,
+  UserPromptSubmitEvent,
+  NotificationEvent,
+  AgentEvent,
+
+  // Configuration
+  BridgeConfig,
+  ResolvedConfig,
+
+  // Adapter types
+  HookConfig,
+  AgentCommandOptions,
+  AgentAdapter,
+
+  // API types
+  ImageInput,
+  SendResult,
+} from 'coding-agent-bridge';
+
+// =============================================================================
+// Tool-to-Station Mapping (CIN-specific - 3D visualization)
 // =============================================================================
 
 /** Map tools to stations in the 3D visualization */
@@ -33,10 +78,31 @@ export function getStationForTool(tool: string): string {
 }
 
 // =============================================================================
-// Event Types
+// CIN-specific Event Types
 // =============================================================================
 
-export type EventType =
+import type { BaseEvent, AgentType } from 'coding-agent-bridge';
+
+/** Base event structure for CIN-specific events (allows custom types) */
+interface CINBaseEvent extends Omit<BaseEvent, 'type'> {
+  type: string;
+}
+
+/** Pre-compact event (CIN-specific) */
+export interface PreCompactEvent extends CINBaseEvent {
+  type: 'pre_compact';
+  trigger: string;
+  customInstructions: string;
+}
+
+/** Unknown event (raw data preserved) */
+export interface UnknownEvent extends CINBaseEvent {
+  type: 'unknown';
+  raw: Record<string, unknown>;
+}
+
+/** Extended event type including CIN-specific events */
+export type CINEventType =
   | 'pre_tool_use'
   | 'post_tool_use'
   | 'stop'
@@ -48,131 +114,48 @@ export type EventType =
   | 'pre_compact'
   | 'unknown';
 
-/** Base event structure */
-export interface BaseEvent {
-  id: string;
-  timestamp: number;
-  type: EventType;
-  sessionId: string;
-  cwd: string;
-  agent?: AgentType;  // Which agent produced this event (defaults to 'claude' for backward compatibility)
-}
-
-/** Pre-tool-use event */
-export interface PreToolUseEvent extends BaseEvent {
-  type: 'pre_tool_use';
-  tool: string;
-  toolInput: Record<string, unknown>;
-  toolUseId: string;
-  assistantText?: string;
-}
-
-/** Post-tool-use event */
-export interface PostToolUseEvent extends BaseEvent {
-  type: 'post_tool_use';
-  tool: string;
-  toolInput: Record<string, unknown>;
-  toolResponse: Record<string, unknown>;
-  toolUseId: string;
-  success: boolean;
-  duration?: number;
-}
-
-/** Stop event */
-export interface StopEvent extends BaseEvent {
-  type: 'stop' | 'subagent_stop';
-  stopHookActive: boolean;
-  response?: string;
-}
-
-/** Terminal info for external sessions (captured from environment) */
-export interface TerminalInfo {
-  tmuxPane?: string;       // TMUX_PANE env var (e.g., "%0")
-  tmuxSocket?: string;     // TMUX env var (socket path)
-  tty?: string;            // Terminal device (e.g., "/dev/ttys001")
-}
-
-/** Session start event */
-export interface SessionStartEvent extends BaseEvent {
-  type: 'session_start';
-  source: string;
-  terminal?: TerminalInfo;  // Terminal info for potential message sending
-}
-
-/** Session end event */
-export interface SessionEndEvent extends BaseEvent {
-  type: 'session_end';
-  reason: string;
-}
-
-/** User prompt submit event */
-export interface UserPromptSubmitEvent extends BaseEvent {
-  type: 'user_prompt_submit';
-  prompt: string;
-}
-
-/** Notification event */
-export interface NotificationEvent extends BaseEvent {
-  type: 'notification';
-  message: string;
-  notificationType: string;
-}
-
-/** Pre-compact event */
-export interface PreCompactEvent extends BaseEvent {
-  type: 'pre_compact';
-  trigger: string;
-  customInstructions: string;
-}
-
-/** Unknown event (raw data preserved) */
-export interface UnknownEvent extends BaseEvent {
-  type: 'unknown';
-  raw: Record<string, unknown>;
-}
-
-/** Union of all event types */
-export type VibecraftEvent =
-  | PreToolUseEvent
-  | PostToolUseEvent
-  | StopEvent
-  | SessionStartEvent
-  | SessionEndEvent
-  | UserPromptSubmitEvent
-  | NotificationEvent
+/** Union of all CIN event types (bridge events + CIN-specific) */
+export type CINEvent =
+  | import('coding-agent-bridge').PreToolUseEvent
+  | import('coding-agent-bridge').PostToolUseEvent
+  | import('coding-agent-bridge').StopEvent
+  | import('coding-agent-bridge').SubagentStopEvent
+  | import('coding-agent-bridge').SessionStartEvent
+  | import('coding-agent-bridge').SessionEndEvent
+  | import('coding-agent-bridge').UserPromptSubmitEvent
+  | import('coding-agent-bridge').NotificationEvent
   | PreCompactEvent
   | UnknownEvent;
 
 // =============================================================================
-// Session Types
+// CIN-specific Session Types
 // =============================================================================
-
-export type SessionStatus = 'idle' | 'working' | 'waiting' | 'offline';
-export type SessionType = 'internal' | 'external';
-export type AgentType = 'claude' | 'codex';
 
 export interface ZonePosition {
   q: number;
   r: number;
 }
 
+/**
+ * CIN-specific managed session - extends bridge's Session with visualization fields
+ */
 export interface ManagedSession {
   id: string;
   name: string;
-  type: SessionType;              // 'internal' = created via New Zone (tmux), 'external' = detected from hooks
-  agent: AgentType;               // 'claude' or 'codex' - which AI agent is running
-  tmuxSession?: string;           // Only for internal sessions
-  status: SessionStatus;
+  type: import('coding-agent-bridge').SessionType;
+  agent: AgentType;
+  tmuxSession?: string;
+  status: import('coding-agent-bridge').SessionStatus;
   createdAt: number;
   lastActivity: number;
   cwd: string;
   claudeSessionId?: string;       // Claude session ID (for Claude agent)
   codexThreadId?: string;         // Codex thread ID (for Codex agent)
   currentTool?: string;
-  zonePosition?: ZonePosition;    // If undefined, session is "unplaced" (not on 3D grid)
-  suggestion?: string;            // Claude's suggested next prompt (shown in gray at input line)
-  autoAccept?: boolean;           // Ralph Wiggum mode - auto-accept suggestions
-  terminal?: TerminalInfo;        // Terminal info for external sessions (enables message sending)
+  zonePosition?: ZonePosition;    // CIN-specific: hex grid position
+  suggestion?: string;            // CIN-specific: Claude's suggested next prompt
+  autoAccept?: boolean;           // CIN-specific: Ralph Wiggum mode
+  terminal?: import('coding-agent-bridge').TerminalInfo;
 }
 
 export interface SessionFlags {
@@ -184,23 +167,23 @@ export interface SessionFlags {
   // Codex-specific flags
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';  // Codex: --sandbox
   approval?: 'untrusted' | 'on-failure' | 'on-request' | 'never';    // Codex: --ask-for-approval
-  fullAuto?: boolean;           // Codex: --full-auto (convenience alias for -a on-request, --sandbox workspace-write)
-  model?: string;               // Codex: --model (e.g., 'gpt-5.2-codex-high', 'o3')
+  fullAuto?: boolean;           // Codex: --full-auto
+  model?: string;               // Codex: --model
 
   // Shared flags
-  openTerminal?: boolean;       // Open Terminal.app attached to tmux session (default: true)
+  openTerminal?: boolean;       // Open Terminal.app attached to tmux session
 }
 
 export interface CreateSessionOptions {
   name?: string;
   cwd?: string;
-  agent?: AgentType;  // 'claude' (default) or 'codex'
+  agent?: AgentType;
   flags?: SessionFlags;
-  zonePosition?: ZonePosition;
+  zonePosition?: ZonePosition;  // CIN-specific
 }
 
 // =============================================================================
-// Git Status Types
+// Git Status Types (CIN-specific)
 // =============================================================================
 
 export interface GitFileChanges {
@@ -226,7 +209,7 @@ export interface GitStatus {
 }
 
 // =============================================================================
-// Permission Types
+// Permission Types (CIN-specific)
 // =============================================================================
 
 export interface PermissionOption {
@@ -242,7 +225,7 @@ export interface PermissionPrompt {
 }
 
 // =============================================================================
-// Text Tile Types
+// Text Tile Types (CIN-specific - 3D visualization)
 // =============================================================================
 
 export interface TextTile {
@@ -254,7 +237,7 @@ export interface TextTile {
 }
 
 // =============================================================================
-// WebSocket Message Types
+// WebSocket Message Types (CIN-specific)
 // =============================================================================
 
 export interface WSMessage {
@@ -264,12 +247,12 @@ export interface WSMessage {
 
 export interface WSEventMessage extends WSMessage {
   type: 'event';
-  payload: VibecraftEvent;
+  payload: CINEvent;
 }
 
 export interface WSHistoryMessage extends WSMessage {
   type: 'history';
-  payload: VibecraftEvent[];
+  payload: CINEvent[];
 }
 
 export interface WSSessionsMessage extends WSMessage {
@@ -297,7 +280,7 @@ export interface WSPermissionPromptMessage extends WSMessage {
 }
 
 // =============================================================================
-// Project Types
+// Project Types (CIN-specific)
 // =============================================================================
 
 export interface Project {
@@ -319,7 +302,7 @@ export const DEFAULT_CONFIG = {
 };
 
 // =============================================================================
-// Codex-Specific Types
+// Codex-Specific Types (CIN-specific - for CodexSessionWatcher)
 // =============================================================================
 
 /** Codex event types from --json output */

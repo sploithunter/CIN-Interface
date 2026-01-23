@@ -15,7 +15,7 @@ import { watch, existsSync, readdirSync, statSync, readFileSync } from 'fs';
 import { join, resolve, basename, dirname } from 'path';
 import { EventEmitter } from 'events';
 import type {
-  VibecraftEvent,
+  CINEvent,
   ManagedSession,
 } from '../shared/types.js';
 
@@ -380,7 +380,7 @@ export class CodexSessionWatcher extends EventEmitter {
    * Map a Codex session log event to CIN-Interface format
    * Handles the actual session log format (session_meta, response_item, event_msg, turn_context)
    */
-  private mapCodexEvent(raw: CodexSessionLogEvent, tracked: TrackedFile): VibecraftEvent | null {
+  private mapCodexEvent(raw: CodexSessionLogEvent, tracked: TrackedFile): CINEvent | null {
     const base = {
       id: `codex-${tracked.threadId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       timestamp: new Date(raw.timestamp).getTime(),
@@ -439,7 +439,7 @@ export class CodexSessionWatcher extends EventEmitter {
   private mapResponseItem(
     item: CodexResponseItem,
     base: { id: string; timestamp: number; sessionId: string; cwd: string; agent: 'codex' }
-  ): VibecraftEvent | null {
+  ): CINEvent | null {
     switch (item.type) {
       case 'function_call': {
         // Map Codex function names to CIN-Interface tool names

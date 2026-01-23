@@ -35,7 +35,7 @@ CIN-Interface is a real-time visualization and management interface for AI codin
            │                          │               │
 ┌──────────┴──────────┐    ┌──────────┴──────────┐   │
 │   Hook Script       │    │   Codex Watcher     │   │
-│   (vibecraft-hook)  │    │   writes to file    │   │
+│   (cin-hook)  │    │   writes to file    │   │
 │   writes to file    │    │                     │   │
 └──────────┬──────────┘    └─────────────────────┘   │
            │                                          │
@@ -73,12 +73,12 @@ Codex Session File → CodexWatcher → events.jsonl → File Watcher → addEve
 
 ## Data Storage
 
-All persistent data in `~/.vibecraft/`:
+All persistent data in `~/.cin-interface/`:
 
 ```
-~/.vibecraft/
+~/.cin-interface/
 ├── hooks/
-│   └── vibecraft-hook.sh      # Claude Code hook script
+│   └── cin-hook.sh      # Claude Code hook script
 ├── data/
 │   ├── events.jsonl           # UNIFIED EVENT LOG (single source of truth)
 │   ├── sessions.json          # Managed session state
@@ -216,7 +216,7 @@ Each line is a JSON object:
 ```typescript
 // Server → Relay
 { type: 'register', apiKey: string, capabilities: string[] }
-{ type: 'broadcast', payload: VibecraftEvent }
+{ type: 'broadcast', payload: CINEvent }
 { type: 'response', clientId: string, payload: any }
 
 // Client → Relay
@@ -225,7 +225,7 @@ Each line is a JSON object:
 { type: 'request', payload: { method: string, path: string, body?: any } }
 
 // Relay → Client
-{ type: 'event', payload: VibecraftEvent }
+{ type: 'event', payload: CINEvent }
 { type: 'response', payload: any }
 { type: 'error', code: string, message: string }
 ```
@@ -308,10 +308,10 @@ Each line is a JSON object:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VIBECRAFT_PORT` | 4003 | Server port |
-| `VIBECRAFT_DEBUG` | false | Debug logging |
-| `VIBECRAFT_EVENTS_FILE` | ~/.vibecraft/data/events.jsonl | Events file |
-| `VIBECRAFT_SESSIONS_FILE` | ~/.vibecraft/data/sessions.json | Sessions file |
+| `CIN_PORT` | 4003 | Server port |
+| `CIN_DEBUG` | false | Debug logging |
+| `CIN_EVENTS_FILE` | ~/.cin-interface/data/events.jsonl | Events file |
+| `CIN_SESSIONS_FILE` | ~/.cin-interface/data/sessions.json | Sessions file |
 | `DEEPGRAM_API_KEY` | - | Voice transcription |
 
 ## Known Limitations
