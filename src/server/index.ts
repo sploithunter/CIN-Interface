@@ -112,6 +112,7 @@ const PENDING_PROMPT_FILE = resolve(
 );
 const MAX_EVENTS = parseInt(process.env.CIN_MAX_EVENTS ?? String(DEFAULTS.MAX_EVENTS), 10);
 const DEBUG = process.env.CIN_DEBUG === 'true';
+const TRACE = process.env.CIN_TRACE === 'true'; // Verbose event field detection logging
 const TMUX_SESSION = process.env.CIN_TMUX_SESSION ?? DEFAULTS.TMUX_SESSION;
 const SESSIONS_FILE = resolve(
   expandHome(process.env.CIN_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE)
@@ -282,7 +283,8 @@ const bridgeFileWatcher = createFileWatcher(EVENTS_FILE, {
 });
 
 // EventProcessor to transform raw hook events (with hook_event_name) to normalized events (with type)
-const bridgeEventProcessor = createEventProcessor({ debug: DEBUG });
+// Use TRACE for verbose field detection logging: CIN_TRACE=true npm run dev
+const bridgeEventProcessor = createEventProcessor({ debug: DEBUG, trace: TRACE });
 
 // TmuxExecutor for safe tmux operations (replaces embedded tmux code)
 const bridgeTmux = createTmuxExecutor({ debug: DEBUG });
