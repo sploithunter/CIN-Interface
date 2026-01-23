@@ -15,7 +15,7 @@ export declare const DEFAULTS: {
      * how the app was installed (npx, global npm, local dev).
      * The ~ is expanded by the server at runtime.
      */
-    readonly EVENTS_FILE: "~/.cin-interface/data/events.jsonl";
+    readonly EVENTS_FILE: "~/.coding-agent-bridge/data/events.jsonl";
     /**
      * Sessions file path.
      * Uses ~/.cin-interface/ for consistency across installations.
