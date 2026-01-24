@@ -60,6 +60,15 @@ node bin/cli.js setup-codex
 
 # Remove hooks
 node bin/cli.js uninstall
+
+# Feedback → GitHub Issues Agent
+npm run agent:issues -- --cwd /path/to/project
+
+# GitHub Issues → Auto-fix Agent (polling)
+npm run agent:poller -- --repos owner/repo --allowed-users username
+
+# GitHub Issues → Auto-fix Agent (webhook)
+npm run agent:webhook -- --port 3001 --cwd /path/to/repo
 ```
 
 ## Getting Started (Development)
@@ -248,6 +257,13 @@ CIN-Interface maintains its own:
 | GET/POST/PUT/DELETE | `/tiles` | Text tile CRUD |
 | GET | `/projects` | Known project directories |
 | GET | `/projects/autocomplete` | Path autocomplete |
+| POST | `/feedback` | Create feedback (screenshot, context) |
+| GET | `/feedback` | List feedback (?type=, ?processed=) |
+| GET | `/feedback/:id` | Get single feedback |
+| GET | `/feedback/unprocessed` | Get unprocessed feedback |
+| PATCH | `/feedback/:id` | Update feedback (mark processed) |
+| DELETE | `/feedback/:id` | Delete feedback |
+| GET | `/browse` | Directory browser (?path=) |
 
 ## Event Types
 
@@ -307,6 +323,70 @@ Sessions are managed via the bridge's TmuxExecutor:
 
 - **Claude Code** (`claude`): Full support via hooks
 - **OpenAI Codex CLI** (`codex`): Support via notify hook and session file watching
+
+## Automated Feedback & Issue Resolution
+
+CIN-Interface includes agents for end-to-end automation from user feedback to code fixes:
+
+```
+User Feedback → Issue Creator → GitHub Issue → Issue Poller → Claude Code → Fix
+     (UI)         (Agent)          (GH)          (Agent)       (Session)    (Branch)
+```
+
+### Issue Creator Agent (`npm run agent:issues`)
+
+Polls unprocessed feedback and spawns Claude Code sessions to create GitHub issues:
+
+```bash
+npm run agent:issues -- --cwd /path/to/project
+npm run agent:issues -- --api-url http://localhost:4003 --debug
+```
+
+### Issue Poller Agent (`npm run agent:poller`)
+
+Watches GitHub repos for new issues and spawns Claude Code to analyze or fix them:
+
+```bash
+# Watch all repos for a user (analyze only)
+npm run agent:poller -- --user myuser --allowed-users myuser
+
+# Watch specific repos with auto-fix
+npm run agent:poller -- --repos owner/repo --auto-fix --allowed-users owner
+```
+
+### Issue Webhook Agent (`npm run agent:webhook`)
+
+Real-time webhook handler for instant response to new GitHub issues:
+
+```bash
+npm run agent:webhook -- --port 3001 --cwd /path/to/repo --allowed-users owner
+```
+
+### Security Configuration
+
+**CRITICAL**: Agents execute arbitrary code via Claude Code. Only allow trusted users.
+
+Config file: `~/.cin-interface/agent-config.json`
+```json
+{
+  "allowedUsers": ["your-github-username", "trusted-collaborator"]
+}
+```
+
+Or via CLI: `--allowed-users username1,username2`
+
+### Full Automation Example
+
+```bash
+# Terminal 1: CIN-Interface server
+npm run dev:server
+
+# Terminal 2: Feedback → GitHub issues
+npm run agent:issues -- --cwd /path/to/project
+
+# Terminal 3: GitHub issues → Code fixes
+npm run agent:poller -- --repos owner/repo --auto-fix --allowed-users owner
+```
 
 ## Next Development Steps
 

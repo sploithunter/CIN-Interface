@@ -47,7 +47,10 @@
     "test:unit": "vitest run tests/unit",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "agent:issues": "tsx src/agent/issue-creator.ts",
+    "agent:poller": "tsx src/agent/issue-poller.ts",
+    "agent:webhook": "tsx src/agent/issue-worker.ts"
   },
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
