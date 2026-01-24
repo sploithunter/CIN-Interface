@@ -133,6 +133,11 @@ const WORKING_TIMEOUT_MS = 120_000; // 2 minutes
 /** Time before offline internal sessions with dead tmux are auto-cleaned (1 hour) */
 const OFFLINE_CLEANUP_MS = 60 * 60 * 1000; // 1 hour
 
+/** Time before offline EXTERNAL sessions are auto-cleaned (15 minutes)
+ * External sessions are receive-only - we can't restart or interact with them,
+ * so there's no point keeping them around once they go offline */
+const EXTERNAL_OFFLINE_CLEANUP_MS = 5 * 60 * 1000; // 5 minutes
+
 /** Time before ANY offline session (including external) is auto-cleaned (7 days) */
 const OFFLINE_STALE_CLEANUP_DAYS = 7;
 const OFFLINE_STALE_CLEANUP_MS = OFFLINE_STALE_CLEANUP_DAYS * 24 * 60 * 60 * 1000;
@@ -1193,6 +1198,10 @@ function checkWorkingTimeout(): void {
 /** How long without file activity before marking Codex sessions offline */
 const CODEX_INACTIVE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes (Codex may be idle but still open)
 
+/** How long without activity before marking EXTERNAL idle/waiting sessions as offline
+ * External sessions can't be restarted, so if they've been quiet this long, they're likely dead */
+const EXTERNAL_IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Check Codex session health based on session file modification time.
  * This is more accurate than lastActivity since the file is updated even
@@ -1232,9 +1241,96 @@ function checkCodexSessionHealth(): void {
 }
 
 /**
+ * Check if a tmux pane exists using the bridge's TmuxExecutor.
+ * Returns true if the pane is alive, false if not found.
+ */
+async function checkTmuxPaneExists(paneId: string, socket?: string): Promise<boolean> {
+  try {
+    // Use tmux list-panes to check if the specific pane exists
+    // The pane ID is like %123 - we need to find it in any session
+    const args = socket ? ['-S', socket, 'list-panes', '-a', '-F', '#{pane_id}'] : ['list-panes', '-a', '-F', '#{pane_id}'];
+    const result = await bridgeTmux.run(args);
+    const panes = result.stdout?.split('\n').filter(Boolean) || [];
+    return panes.includes(paneId);
+  } catch {
+    // If tmux fails, assume the pane doesn't exist
+    return false;
+  }
+}
+
+/**
+ * Check external sessions for staleness.
+ * External sessions that have been inactive for too long are marked offline
+ * since we can't interact with them and they're likely dead.
+ *
+ * Unlike internal sessions, external sessions can't be restarted, so we
+ * aggressively clean them up to avoid cluttering the UI.
+ *
+ * For sessions with terminal info (tmux pane), we probe the terminal to verify
+ * it's actually alive before relying on the activity timeout.
+ */
+async function checkExternalSessionHealth(): Promise<void> {
+  const now = Date.now();
+  let changed = false;
+
+  const sessions = cinSessionManager.listSessions();
+  for (const session of sessions) {
+    // Only check external sessions that aren't already offline
+    if (session.type !== 'external') continue;
+    if (session.status === 'offline') continue;
+
+    // Codex sessions have their own health check based on file modification
+    if (session.agent === 'codex' && session.codexThreadId) continue;
+
+    // PROBE: If we have tmux pane info, check if the pane still exists
+    // This is more accurate than time-based cleanup
+    if (session.terminal?.tmuxPane) {
+      const paneExists = await checkTmuxPaneExists(
+        session.terminal.tmuxPane,
+        session.terminal.tmuxSocket
+      );
+
+      if (!paneExists) {
+        log(`External session "${session.name}" marked offline (tmux pane ${session.terminal.tmuxPane} no longer exists)`);
+        cinSessionManager.updateSessionStatus(session.id, 'offline');
+        cinSessionManager.updateSessionTool(session.id, undefined);
+        changed = true;
+        continue;
+      }
+    }
+
+    // Fall back to time-based check for sessions without terminal info
+    // or if the terminal exists but has been inactive
+    const timeSinceActivity = now - session.lastActivity;
+
+    // For "working" sessions, use a shorter timeout since they may be
+    // phantom sessions created from historical events in events.jsonl
+    // Use same timeout as the working timeout (2 min)
+    const threshold = session.status === 'working'
+      ? WORKING_TIMEOUT_MS
+      : EXTERNAL_IDLE_THRESHOLD_MS;
+
+    if (timeSinceActivity > threshold) {
+      const mins = Math.round(timeSinceActivity / 60000);
+      const secs = Math.round(timeSinceActivity / 1000);
+      const timeStr = mins > 0 ? `${mins} min` : `${secs}s`;
+      log(`External session "${session.name}" (${session.status}) marked offline (inactive for ${timeStr})`);
+      cinSessionManager.updateSessionStatus(session.id, 'offline');
+      cinSessionManager.updateSessionTool(session.id, undefined);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    broadcastSessions();
+  }
+}
+
+/**
  * Auto-cleanup offline sessions:
- * 1. Internal sessions whose tmux process is gone - cleaned up after 1 hour
- * 2. ALL sessions (including external) offline for > 7 days - cleaned up automatically
+ * 1. External sessions offline > 15 minutes - cleaned up (can't interact with them anyway)
+ * 2. Internal sessions whose tmux process is gone - cleaned up after 1 hour
+ * 3. ALL sessions (including external) offline for > 7 days - cleaned up automatically
  */
 async function cleanupStaleOfflineSessions(): Promise<void> {
   const now = Date.now();
@@ -1265,7 +1361,17 @@ async function cleanupStaleOfflineSessions(): Promise<void> {
       continue;
     }
 
-    // Rule 2: Internal sessions with dead tmux - cleaned up after 1 hour
+    // Rule 2: External sessions - cleaned up after 15 minutes offline
+    // External sessions are receive-only; we can't restart or interact with them
+    if (session.type === 'external') {
+      if (offlineTime >= EXTERNAL_OFFLINE_CLEANUP_MS) {
+        log(`Auto-cleaning external session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
+        toDelete.push(session.id);
+      }
+      continue;
+    }
+
+    // Rule 3: Internal sessions with dead tmux - cleaned up after 1 hour
     if (session.type === 'internal' && session.tmuxSession) {
       // If tmux session still exists, don't cleanup (something wrong with our state)
       if (activeTmuxSessions.has(session.tmuxSession)) {
@@ -2882,11 +2988,13 @@ function main(): void {
     startRalphWiggumPolling();
     setInterval(() => { checkSessionHealth().catch(e => DEBUG && console.error('Session health check error:', e)); }, 5000);
     setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS);
-    setInterval(checkCodexSessionHealth, 30_000); // Check every 30 seconds
-    setInterval(() => { cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Cleanup error:', e)); }, 60_000); // Check every minute
+    setInterval(checkCodexSessionHealth, 30_000); // Check Codex sessions every 30 seconds
+    setInterval(() => { checkExternalSessionHealth().catch(e => DEBUG && console.error('External session health error:', e)); }, 60_000); // Check external sessions every minute
+    setInterval(() => { cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Cleanup error:', e)); }, 60_000); // Cleanup every minute
     checkSessionHealth().catch(e => DEBUG && console.error('Initial session health check error:', e));
     checkCodexSessionHealth(); // Mark inactive Codex sessions as offline
-    cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Initial cleanup error:', e)); // Run once at startup
+    checkExternalSessionHealth().catch(e => DEBUG && console.error('Initial external session health error:', e)); // Mark stale external sessions as offline
+    cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Initial cleanup error:', e)); // Cleanup stale sessions
   });
 }
 
