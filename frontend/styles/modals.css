@@ -1874,8 +1874,8 @@
 .feedback-btn {
   position: fixed;
   bottom: 72px; /* Above the keybinds bar at bottom */
-  /* Feed panel (right sidebar) is 420px wide, position button just to its left */
-  right: calc(420px + 24px);
+  /* Feed panel (right sidebar) is 40% wide, position button just to its left */
+  right: calc(40% + 24px);
   width: 44px;
   height: 44px;
   background: rgba(30, 30, 35, 0.9);
