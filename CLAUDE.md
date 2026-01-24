@@ -68,9 +68,9 @@ node bin/cli.js uninstall
 
 1. **Install dependencies**: `npm install`
 2. **Start the dev server**: `npm run dev`
-   - This runs Vite (frontend) on port 4002 and the API server on port 4003
+   - This runs Vite (frontend dev server) on port 4002 and the backend on port 4003
    - Hot reload is enabled for both
-3. **Open the interface**: http://localhost:4002 (proxies API to 4003)
+3. **Open the interface**: http://localhost:4003 (backend serves frontend + API)
 
 ### Running Tests
 
