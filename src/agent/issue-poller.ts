@@ -541,20 +541,35 @@ class IssuePoller {
         return
       }
 
-      // Validation passed - update feedback and close issue
+      // Validation passed - push the fix branch
+      console.log(`   🔄 Pushing fix branch...`)
+      const [repo, issueNum] = issueKey.split('#')
+      const fixBranch = `fix/issue-${issueNum}`
+
+      try {
+        execSync(`git push -u origin ${fixBranch}`, {
+          cwd: checkpoint.cwd,
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        })
+        console.log(`   ✅ Pushed branch ${fixBranch} to origin`)
+      } catch (pushErr) {
+        console.log(`   ⚠️  Failed to push branch: ${(pushErr as Error).message}`)
+      }
+
+      // Update feedback status
       if (checkpoint.feedbackId) {
         await this.updateFeedbackStatus(
           checkpoint.feedbackId,
           'complete',
-          `Fix validated and applied successfully`,
+          `Fix validated and pushed to branch ${fixBranch}`,
           validation.output
         )
       }
 
       // Close the GitHub issue
       try {
-        const [repo, issueNum] = issueKey.split('#')
-        execSync(`gh issue close ${issueNum} --repo ${repo} --comment "Fix implemented and validated by automation agent. Branch: fix/issue-${issueNum}"`, {
+        execSync(`gh issue close ${issueNum} --repo ${repo} --comment "Fix implemented and validated by automation agent. Branch: ${fixBranch}"`, {
           encoding: 'utf-8',
           stdio: 'pipe',
         })
@@ -599,6 +614,15 @@ class IssuePoller {
     if (this.config.debug) {
       console.log('[IssuePoller]', ...args)
     }
+  }
+
+  /**
+   * Extract feedback ID from issue body
+   * Looks for: **Feedback ID:** `uuid-here`
+   */
+  private extractFeedbackId(issueBody: string): string | undefined {
+    const match = issueBody.match(/\*\*Feedback ID:\*\*\s*`([a-f0-9-]+)`/i)
+    return match ? match[1] : undefined
   }
 
   private async fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
@@ -967,7 +991,12 @@ Do not make any changes - just analyze and report your findings.`
     const toProcess = issuesToProcess.slice(0, this.config.maxConcurrentSessions)
 
     for (const { issue, repo } of toProcess) {
-      await this.processIssue(issue, repo)
+      // Extract feedback ID from issue body for status updates
+      const feedbackId = this.extractFeedbackId(issue.body || '')
+      if (feedbackId) {
+        this.log(`Found feedback ID in issue: ${feedbackId}`)
+      }
+      await this.processIssue(issue, repo, feedbackId)
     }
   }
 
