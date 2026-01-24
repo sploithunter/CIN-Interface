@@ -15,8 +15,8 @@
     <meta property="og:site_name" content="CIN-Interface" />
     <meta property="og:title" content="CIN-Interface - Watch and Manage AI Coding Agents in 3D!" />
     <meta property="og:description" content="Watch and Manage AI Coding Agents in 3D!" />
-    <script type="module" crossorigin src="/assets/index-xo-nlaqa.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CnUvHm6O.css">
+    <script type="module" crossorigin src="/assets/index-CF_bH5Qm.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DTem-Zsw.css">
   </head>
   <body>
     <div id="app">
@@ -168,6 +168,7 @@
     <!-- New Session Modal -->
     <div id="new-session-modal">
       <div class="modal-content">
+        <button type="button" class="modal-feedback-btn" title="Send feedback about this dialog">💬</button>
         <div class="modal-header">
           <h3>New Zone</h3>
         </div>
@@ -188,7 +189,10 @@
 
         <div class="modal-field">
           <label for="session-cwd-input">Directory</label>
-          <input type="text" id="session-cwd-input" placeholder="e.g. /home/user/my-project" autocomplete="off" />
+          <div class="input-with-button">
+            <input type="text" id="session-cwd-input" placeholder="e.g. /home/user/my-project" autocomplete="off" />
+            <button type="button" class="browse-btn" id="session-browse-btn" title="Browse...">📁</button>
+          </div>
           <div class="field-hint">Default: <code id="modal-default-cwd">~</code></div>
         </div>
 
@@ -248,6 +252,7 @@
     <!-- Settings Modal -->
     <div id="settings-modal">
       <div class="modal-content">
+        <button type="button" class="modal-feedback-btn" title="Send feedback about this dialog">💬</button>
         <div class="modal-header">
           <h3>Settings</h3>
         </div>
@@ -323,6 +328,7 @@
     <!-- About Modal -->
     <div id="about-modal">
       <div class="modal-content about-modal-content">
+        <button type="button" class="modal-feedback-btn" title="Send feedback about this dialog">💬</button>
         <div class="modal-header">
           <h3>CIN-Interface</h3>
         </div>
@@ -376,6 +382,7 @@
     <!-- Question Modal (for AskUserQuestion) -->
     <div id="question-modal">
       <div class="modal-content question-modal-content">
+        <button type="button" class="modal-feedback-btn" title="Send feedback about this dialog">💬</button>
         <div class="modal-header">
           <span class="question-badge" id="question-badge">Question</span>
           <h3 id="question-header">Claude needs input</h3>
@@ -420,6 +427,7 @@
     <!-- Zone Info Modal (for session details) -->
     <div id="zone-info-modal">
       <div class="modal-content zone-info-modal-content">
+        <button type="button" class="modal-feedback-btn" title="Send feedback about this dialog">💬</button>
         <div class="modal-header">
           <h3>Zone Info</h3>
           <button type="button" class="zone-info-close-btn" id="zone-info-close">&times;</button>

@@ -2078,6 +2078,65 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
     return;
   }
 
+  // GET /browse - Browse filesystem directories (for file explorer)
+  const browseMatch = req.url?.match(/^\/browse(\?.*)?$/);
+  if (req.method === 'GET' && browseMatch) {
+    const urlParams = new URLSearchParams(browseMatch[1] || '');
+    let browsePath = urlParams.get('path') || process.env.HOME || '/';
+
+    // Expand ~ to home directory
+    if (browsePath.startsWith('~')) {
+      browsePath = browsePath.replace('~', process.env.HOME || '');
+    }
+
+    // Resolve to absolute path
+    browsePath = resolve(browsePath);
+
+    try {
+      const stats = statSync(browsePath);
+      if (!stats.isDirectory()) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Path is not a directory' }));
+        return;
+      }
+
+      const entries = readdirSync(browsePath, { withFileTypes: true });
+      const items = entries
+        .filter(entry => {
+          // Always show directories, filter hidden by default
+          if (entry.name.startsWith('.')) return false;
+          return true;
+        })
+        .map(entry => ({
+          name: entry.name,
+          path: join(browsePath, entry.name),
+          isDirectory: entry.isDirectory(),
+        }))
+        .sort((a, b) => {
+          // Directories first, then alphabetical
+          if (a.isDirectory && !b.isDirectory) return -1;
+          if (!a.isDirectory && b.isDirectory) return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+      // Calculate parent path
+      const parentPath = dirname(browsePath);
+      const isRoot = browsePath === '/' || browsePath === parentPath;
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        ok: true,
+        path: browsePath,
+        parent: isRoot ? null : parentPath,
+        items,
+      }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: (e as Error).message }));
+    }
+    return;
+  }
+
   // GET /stats
   if (req.method === 'GET' && req.url === '/stats') {
     const toolCounts: Record<string, number> = {};

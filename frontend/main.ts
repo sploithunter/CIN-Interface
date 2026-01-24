@@ -59,7 +59,8 @@ import { setupDirectoryAutocomplete } from './ui/DirectoryAutocomplete'
 import { checkForUpdates } from './ui/VersionChecker'
 import { drawMode } from './ui/DrawMode'
 import { setupTextLabelModal, showTextLabelModal } from './ui/TextLabelModal'
-import { setupFeedbackModal } from './ui/FeedbackModal'
+import { setupFeedbackModal, showFeedbackModal } from './ui/FeedbackModal'
+import { openFileBrowser } from './ui/FileBrowser'
 import { createSessionAPI, type SessionAPI } from './api'
 
 // ============================================================================
@@ -916,6 +917,18 @@ function setupManagedSessions(): void {
   // Setup directory autocomplete
   if (cwdInput) {
     setupDirectoryAutocomplete(cwdInput)
+  }
+
+  // Setup browse button for file browser
+  const browseBtn = document.getElementById('session-browse-btn')
+  if (browseBtn && cwdInput) {
+    browseBtn.addEventListener('click', () => {
+      openFileBrowser(cwdInput.value || undefined, (selectedPath) => {
+        cwdInput.value = selectedPath
+        // Trigger input event to auto-fill session name
+        cwdInput.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    })
   }
 
   // Auto-populate name from directory when cwd changes
@@ -3512,6 +3525,13 @@ function init() {
       // Get the last 5 event types
       return state.eventHistory.slice(-5).map(e => e.type)
     },
+  })
+
+  // Setup feedback buttons on all modals (allows feedback while viewing any modal)
+  document.querySelectorAll('.modal-feedback-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      showFeedbackModal()
+    })
   })
 
   // Setup zone command modal (quick command input near zone)

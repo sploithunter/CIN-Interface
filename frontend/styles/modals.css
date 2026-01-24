@@ -107,6 +107,40 @@
   margin: 0;
 }
 
+/* Modal feedback button - small icon in upper-right corner */
+.modal-feedback-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  z-index: 10;
+}
+
+.modal-feedback-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.modal-feedback-btn:active {
+  transform: scale(0.95);
+}
+
+.modal-content {
+  position: relative; /* Ensure feedback button is positioned relative to modal */
+}
+
 .modal-field {
   margin-bottom: 16px;
 }
@@ -152,6 +186,36 @@
   padding: 1px 5px;
   border-radius: 3px;
   font-family: monospace;
+}
+
+/* Input with button (e.g., directory input with browse) */
+.input-with-button {
+  display: flex;
+  gap: 8px;
+}
+
+.input-with-button input {
+  flex: 1;
+}
+
+.browse-btn {
+  width: 44px;
+  height: 44px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.browse-btn:hover {
+  background: rgba(167, 139, 250, 0.2);
+  border-color: rgba(167, 139, 250, 0.4);
 }
 
 .modal-actions {
@@ -1364,6 +1428,12 @@
 .zone-info-close-btn:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
+}
+
+/* Move feedback button to left side when close button is on right */
+.zone-info-modal-content .modal-feedback-btn {
+  right: auto;
+  left: 12px;
 }
 
 .zone-info-body {

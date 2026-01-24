@@ -13,7 +13,8 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 // NOTE: chokidar import removed - file watching now handled by bridge's FileWatcher
 import { readFileSync, writeFileSync, existsSync, appendFileSync, statSync, readdirSync, } from 'fs';
-import { exec, execSync } from 'child_process';
+import { exec, execSync, execFile } from 'child_process';
+import { promisify } from 'util';
 import { dirname, resolve, join, extname, basename } from 'path';
 import { hostname } from 'os';
 import { randomUUID } from 'crypto';
@@ -78,6 +79,10 @@ const DATA_DIR = resolve(expandHome('~/.cin-interface/data'));
 const WORKING_TIMEOUT_MS = 120_000; // 2 minutes
 /** Time before offline internal sessions with dead tmux are auto-cleaned (1 hour) */
 const OFFLINE_CLEANUP_MS = 60 * 60 * 1000; // 1 hour
+/** Time before offline EXTERNAL sessions are auto-cleaned (15 minutes)
+ * External sessions are receive-only - we can't restart or interact with them,
+ * so there's no point keeping them around once they go offline */
+const EXTERNAL_OFFLINE_CLEANUP_MS = 5 * 60 * 1000; // 5 minutes
 /** Time before ANY offline session (including external) is auto-cleaned (7 days) */
 const OFFLINE_STALE_CLEANUP_DAYS = 7;
 const OFFLINE_STALE_CLEANUP_MS = OFFLINE_STALE_CLEANUP_DAYS * 24 * 60 * 60 * 1000;
@@ -1005,6 +1010,9 @@ function checkWorkingTimeout() {
 }
 /** How long without file activity before marking Codex sessions offline */
 const CODEX_INACTIVE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes (Codex may be idle but still open)
+/** How long without activity before marking EXTERNAL idle/waiting sessions as offline
+ * External sessions can't be restarted, so if they've been quiet this long, they're likely dead */
+const EXTERNAL_IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 /**
  * Check Codex session health based on session file modification time.
  * This is more accurate than lastActivity since the file is updated even
@@ -1037,10 +1045,93 @@ function checkCodexSessionHealth() {
     }
 }
 /**
- * Auto-cleanup offline sessions:
- * 1. Internal sessions whose tmux process is gone - cleaned up after 1 hour
- * 2. ALL sessions (including external) offline for > 7 days - cleaned up automatically
+ * Check if a tmux pane exists using the bridge's TmuxExecutor.
+ * Returns true if the pane is alive, false if not found.
  */
+const execFileAsync = promisify(execFile);
+async function checkTmuxPaneExists(paneId, socket) {
+    try {
+        // Use tmux list-panes to check if the specific pane exists
+        // The pane ID is like %123 - we need to find it in any session
+        const args = socket
+            ? ['-S', socket, 'list-panes', '-a', '-F', '#{pane_id}']
+            : ['list-panes', '-a', '-F', '#{pane_id}'];
+        const result = await execFileAsync('tmux', args);
+        const panes = result.stdout?.split('\n').filter(Boolean) || [];
+        return panes.includes(paneId);
+    }
+    catch {
+        // If tmux fails, assume the pane doesn't exist
+        return false;
+    }
+}
+/**
+ * Check external sessions for staleness.
+ * External sessions that have been inactive for too long are marked offline
+ * since we can't interact with them and they're likely dead.
+ *
+ * Unlike internal sessions, external sessions can't be restarted, so we
+ * aggressively clean them up to avoid cluttering the UI.
+ *
+ * For sessions with terminal info (tmux pane), we probe the terminal to verify
+ * it's actually alive before relying on the activity timeout.
+ */
+async function checkExternalSessionHealth() {
+    const now = Date.now();
+    let changed = false;
+    const sessions = cinSessionManager.listSessions();
+    for (const session of sessions) {
+        // Only check external sessions that aren't already offline
+        if (session.type !== 'external')
+            continue;
+        if (session.status === 'offline')
+            continue;
+        // Codex sessions have their own health check based on file modification
+        if (session.agent === 'codex' && session.codexThreadId)
+            continue;
+        // PROBE: If we have tmux pane info, check if the pane still exists
+        // This is more accurate than time-based cleanup
+        if (session.terminal?.tmuxPane) {
+            const paneExists = await checkTmuxPaneExists(session.terminal.tmuxPane, session.terminal.tmuxSocket);
+            if (!paneExists) {
+                log(`External session "${session.name}" marked offline (tmux pane ${session.terminal.tmuxPane} no longer exists)`);
+                cinSessionManager.updateSessionStatus(session.id, 'offline');
+                cinSessionManager.updateSessionTool(session.id, undefined);
+                changed = true;
+                continue;
+            }
+        }
+        // Fall back to time-based check for sessions without terminal info
+        // or if the terminal exists but has been inactive
+        const timeSinceActivity = now - session.lastActivity;
+        // For "working" sessions, use a shorter timeout since they may be
+        // phantom sessions created from historical events in events.jsonl
+        // Use same timeout as the working timeout (2 min)
+        const threshold = session.status === 'working'
+            ? WORKING_TIMEOUT_MS
+            : EXTERNAL_IDLE_THRESHOLD_MS;
+        if (timeSinceActivity > threshold) {
+            const mins = Math.round(timeSinceActivity / 60000);
+            const secs = Math.round(timeSinceActivity / 1000);
+            const timeStr = mins > 0 ? `${mins} min` : `${secs}s`;
+            log(`External session "${session.name}" (${session.status}) marked offline (inactive for ${timeStr})`);
+            cinSessionManager.updateSessionStatus(session.id, 'offline');
+            cinSessionManager.updateSessionTool(session.id, undefined);
+            changed = true;
+        }
+    }
+    if (changed) {
+        broadcastSessions();
+    }
+}
+/**
+ * Auto-cleanup offline sessions:
+ * 1. External sessions offline > 15 minutes - cleaned up (can't interact with them anyway)
+ * 2. Internal sessions whose tmux process is gone - cleaned up after 1 hour
+ * 3. ALL sessions (including external) offline for > 7 days - cleaned up automatically
+ */
+// Threshold for deleting phantom external sessions (no terminal info)
+const PHANTOM_SESSION_CLEANUP_MS = 2 * 60 * 1000; // 2 minutes
 async function cleanupStaleOfflineSessions() {
     const now = Date.now();
     const toDelete = [];
@@ -1055,10 +1146,22 @@ async function cleanupStaleOfflineSessions() {
     }
     const allSessions = cinSessionManager.listSessions();
     for (const session of allSessions) {
+        const timeSinceActivity = now - session.lastActivity;
+        // Rule 0: Phantom external sessions (no terminal info) - delete aggressively
+        // These are sessions created from events but have no real terminal to interact with
+        // They're useless and clutter the UI
+        if (session.type === 'external' && !session.terminal) {
+            if (timeSinceActivity >= PHANTOM_SESSION_CLEANUP_MS) {
+                log(`Auto-cleaning phantom external session: ${session.name} (no terminal, inactive for ${Math.round(timeSinceActivity / 1000)}s)`);
+                toDelete.push(session.id);
+            }
+            continue;
+        }
+        // Skip non-offline sessions for remaining rules
         if (session.status !== 'offline') {
             continue;
         }
-        const offlineTime = now - session.lastActivity;
+        const offlineTime = timeSinceActivity;
         // Rule 1: Any session offline for > 7 days gets cleaned up (internal or external)
         if (offlineTime >= OFFLINE_STALE_CLEANUP_MS) {
             const days = Math.round(offlineTime / (24 * 60 * 60 * 1000));
@@ -1066,7 +1169,16 @@ async function cleanupStaleOfflineSessions() {
             toDelete.push(session.id);
             continue;
         }
-        // Rule 2: Internal sessions with dead tmux - cleaned up after 1 hour
+        // Rule 2: External sessions - cleaned up after 5 minutes offline
+        // External sessions are receive-only; we can't restart or interact with them
+        if (session.type === 'external') {
+            if (offlineTime >= EXTERNAL_OFFLINE_CLEANUP_MS) {
+                log(`Auto-cleaning external session: ${session.name} (offline for ${Math.round(offlineTime / 60000)} min)`);
+                toDelete.push(session.id);
+            }
+            continue;
+        }
+        // Rule 3: Internal sessions with dead tmux - cleaned up after 1 hour
         if (session.type === 'internal' && session.tmuxSession) {
             // If tmux session still exists, don't cleanup (something wrong with our state)
             if (activeTmuxSessions.has(session.tmuxSession)) {
@@ -1084,7 +1196,7 @@ async function cleanupStaleOfflineSessions() {
         await deleteSession(id);
     }
     if (toDelete.length > 0) {
-        log(`Cleaned up ${toDelete.length} stale offline session(s)`);
+        log(`Cleaned up ${toDelete.length} stale session(s)`);
     }
 }
 // Note: Session persistence is now handled by bridgeSessionManager + cinSessionManager.
@@ -1387,6 +1499,9 @@ function addEvent(event) {
 // =============================================================================
 // File Watching
 // =============================================================================
+// Maximum age for events to process from file on startup
+// Events older than this won't create sessions (prevents phantom sessions from old test data)
+const MAX_EVENT_AGE_MS = 30 * 60 * 1000; // 30 minutes
 function loadEventsFromFile() {
     if (!existsSync(EVENTS_FILE)) {
         debug(`Events file not found: ${EVENTS_FILE}`);
@@ -1394,9 +1509,18 @@ function loadEventsFromFile() {
     }
     const content = readFileSync(EVENTS_FILE, 'utf-8');
     const lines = content.trim().split('\n').filter(Boolean);
+    const now = Date.now();
+    let skippedOld = 0;
     for (const line of lines) {
         try {
             const event = JSON.parse(line);
+            // Skip events older than MAX_EVENT_AGE_MS to prevent phantom sessions
+            // from old test data when the server restarts
+            if (event.timestamp && (now - event.timestamp) > MAX_EVENT_AGE_MS) {
+                skippedOld++;
+                events.push(event); // Still add to history for display
+                continue; // But don't create/update sessions
+            }
             processEvent(event);
             // Normalize: always use managed session ID for event sessionId
             // This allows the frontend to use a single ID for zones and filtering
@@ -1412,7 +1536,12 @@ function loadEventsFromFile() {
         }
     }
     lastFileSize = content.length;
-    log(`Loaded ${events.length} events from file`);
+    if (skippedOld > 0) {
+        log(`Loaded ${events.length} events from file (skipped ${skippedOld} old events for session creation)`);
+    }
+    else {
+        log(`Loaded ${events.length} events from file`);
+    }
 }
 // NOTE: watchEventsFile() has been removed and replaced by bridge's FileWatcher
 // See initBridgeEventFlow() for the new implementation
@@ -1633,6 +1762,62 @@ async function handleHttpRequest(req, res) {
         }));
         return;
     }
+    // GET /browse - Browse filesystem directories (for file explorer)
+    const browseMatch = req.url?.match(/^\/browse(\?.*)?$/);
+    if (req.method === 'GET' && browseMatch) {
+        const urlParams = new URLSearchParams(browseMatch[1] || '');
+        let browsePath = urlParams.get('path') || process.env.HOME || '/';
+        // Expand ~ to home directory
+        if (browsePath.startsWith('~')) {
+            browsePath = browsePath.replace('~', process.env.HOME || '');
+        }
+        // Resolve to absolute path
+        browsePath = resolve(browsePath);
+        try {
+            const stats = statSync(browsePath);
+            if (!stats.isDirectory()) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Path is not a directory' }));
+                return;
+            }
+            const entries = readdirSync(browsePath, { withFileTypes: true });
+            const items = entries
+                .filter(entry => {
+                // Always show directories, filter hidden by default
+                if (entry.name.startsWith('.'))
+                    return false;
+                return true;
+            })
+                .map(entry => ({
+                name: entry.name,
+                path: join(browsePath, entry.name),
+                isDirectory: entry.isDirectory(),
+            }))
+                .sort((a, b) => {
+                // Directories first, then alphabetical
+                if (a.isDirectory && !b.isDirectory)
+                    return -1;
+                if (!a.isDirectory && b.isDirectory)
+                    return 1;
+                return a.name.localeCompare(b.name);
+            });
+            // Calculate parent path
+            const parentPath = dirname(browsePath);
+            const isRoot = browsePath === '/' || browsePath === parentPath;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                ok: true,
+                path: browsePath,
+                parent: isRoot ? null : parentPath,
+                items,
+            }));
+        }
+        catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: e.message }));
+        }
+        return;
+    }
     // GET /stats
     if (req.method === 'GET' && req.url === '/stats') {
         const toolCounts = {};
@@ -1681,15 +1866,42 @@ async function handleHttpRequest(req, res) {
         }
         return;
     }
-    // DELETE /sessions/cleanup - Remove offline sessions
+    // DELETE /sessions/cleanup - Remove stale sessions
+    // Query params:
+    //   maxAge=<ms> - Only delete sessions inactive for at least this long
+    //   type=external - Only delete external sessions
+    //   phantom=true - Delete external sessions without terminal info (regardless of status)
     const cleanupMatch = req.url?.match(/^\/sessions\/cleanup(\?.*)?$/);
     if (req.method === 'DELETE' && cleanupMatch) {
         const urlParams = new URLSearchParams(cleanupMatch[1] || '');
         const maxAgeMs = parseInt(urlParams.get('maxAge') || '0', 10);
+        const typeFilter = urlParams.get('type');
+        const phantomOnly = urlParams.get('phantom') === 'true';
         const now = Date.now();
         const toDelete = [];
         const sessions = cinSessionManager.listSessions();
         for (const session of sessions) {
+            // Type filter
+            if (typeFilter && session.type !== typeFilter)
+                continue;
+            // Phantom filter: external sessions without terminal info
+            // These are sessions created from events but have no real terminal to interact with
+            if (phantomOnly) {
+                if (session.type === 'external' && !session.terminal) {
+                    // Check age if specified
+                    if (maxAgeMs > 0) {
+                        const age = now - session.lastActivity;
+                        if (age >= maxAgeMs) {
+                            toDelete.push(session.id);
+                        }
+                    }
+                    else {
+                        toDelete.push(session.id);
+                    }
+                }
+                continue;
+            }
+            // Standard offline cleanup
             if (session.status === 'offline') {
                 if (maxAgeMs > 0) {
                     // Only delete if offline longer than maxAge
@@ -1708,7 +1920,7 @@ async function handleHttpRequest(req, res) {
         for (const id of toDelete) {
             await deleteSession(id);
         }
-        log(`Cleaned up ${toDelete.length} offline sessions`);
+        log(`Cleaned up ${toDelete.length} sessions (phantom=${phantomOnly}, type=${typeFilter || 'all'})`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, deleted: toDelete.length }));
         return;
@@ -2489,11 +2701,13 @@ function main() {
         startRalphWiggumPolling();
         setInterval(() => { checkSessionHealth().catch(e => DEBUG && console.error('Session health check error:', e)); }, 5000);
         setInterval(checkWorkingTimeout, WORKING_CHECK_INTERVAL_MS);
-        setInterval(checkCodexSessionHealth, 30_000); // Check every 30 seconds
-        setInterval(() => { cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Cleanup error:', e)); }, 60_000); // Check every minute
+        setInterval(checkCodexSessionHealth, 30_000); // Check Codex sessions every 30 seconds
+        setInterval(() => { checkExternalSessionHealth().catch(e => DEBUG && console.error('External session health error:', e)); }, 60_000); // Check external sessions every minute
+        setInterval(() => { cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Cleanup error:', e)); }, 60_000); // Cleanup every minute
         checkSessionHealth().catch(e => DEBUG && console.error('Initial session health check error:', e));
         checkCodexSessionHealth(); // Mark inactive Codex sessions as offline
-        cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Initial cleanup error:', e)); // Run once at startup
+        checkExternalSessionHealth().catch(e => DEBUG && console.error('Initial external session health error:', e)); // Mark stale external sessions as offline
+        cleanupStaleOfflineSessions().catch(e => DEBUG && console.error('Initial cleanup error:', e)); // Cleanup stale sessions
     });
 }
 main();
