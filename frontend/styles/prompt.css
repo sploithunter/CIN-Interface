@@ -428,7 +428,7 @@
 }
 
 .voice-control.disabled::after {
-  content: 'Set DEEPGRAM_API_KEY in .env';
+  content: 'Voice input unavailable';
   font-size: 10px;
   color: rgba(255, 255, 255, 0.4);
   margin-top: 8px;
