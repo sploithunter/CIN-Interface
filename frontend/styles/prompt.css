@@ -359,7 +359,7 @@
 /* Voice control - center bottom of 3D scene */
 .voice-control {
   position: absolute;
-  bottom: 80px;
+  bottom: 35px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
