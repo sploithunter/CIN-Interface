@@ -1869,13 +1869,13 @@
    Feedback Button & Modal
    ============================================================================= */
 
-/* Floating feedback button - positioned at bottom of scene panel, right side */
+/* Floating feedback button - positioned in lower-right corner of 3D viewport (left pane) */
+/* Above the keybinds bar, left of the feed panel sidebar */
 .feedback-btn {
   position: fixed;
-  bottom: 16px;
-  /* Position at the left edge of the feed panel (right side of scene panel) */
-  /* Feed panel is 420px wide on the right, so we offset from that */
-  right: calc(420px + 16px);
+  bottom: 72px; /* Above the keybinds bar at bottom */
+  /* Feed panel (right sidebar) is 420px wide, position button just to its left */
+  right: calc(420px + 24px);
   width: 44px;
   height: 44px;
   background: rgba(30, 30, 35, 0.9);
