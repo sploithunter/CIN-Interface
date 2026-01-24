@@ -1864,3 +1864,188 @@
 .zone-command-input::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
 }
+
+/* =============================================================================
+   Feedback Button & Modal
+   ============================================================================= */
+
+/* Floating feedback button - positioned at bottom of scene panel, right side */
+.feedback-btn {
+  position: fixed;
+  bottom: 16px;
+  /* Position at the left edge of the feed panel (right side of scene panel) */
+  /* Feed panel is 420px wide on the right, so we offset from that */
+  right: calc(420px + 16px);
+  width: 44px;
+  height: 44px;
+  background: rgba(30, 30, 35, 0.9);
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.feedback-btn:hover {
+  background: rgba(167, 139, 250, 0.2);
+  border-color: rgba(167, 139, 250, 0.6);
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(167, 139, 250, 0.2);
+}
+
+.feedback-btn-icon {
+  font-size: 18px;
+}
+
+/* Feedback modal container */
+#feedback-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+}
+
+#feedback-modal.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+#feedback-modal.visible .modal-content {
+  transform: scale(1) translateY(0);
+}
+
+.feedback-modal-content {
+  width: 400px;
+}
+
+/* Type selector - radio buttons styled as segmented control */
+.feedback-type-selector {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.feedback-type-option {
+  flex: 1;
+  cursor: pointer;
+}
+
+.feedback-type-option input[type="radio"] {
+  display: none;
+}
+
+.feedback-type-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+
+.feedback-type-option input[type="radio"]:checked + .feedback-type-label {
+  background: rgba(167, 139, 250, 0.15);
+  border-color: rgba(167, 139, 250, 0.5);
+}
+
+.feedback-type-option:hover .feedback-type-label {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.feedback-type-option input[type="radio"]:checked + .feedback-type-label:hover {
+  background: rgba(167, 139, 250, 0.2);
+}
+
+.feedback-type-icon {
+  font-size: 24px;
+}
+
+.feedback-type-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.feedback-type-option input[type="radio"]:checked + .feedback-type-label .feedback-type-text {
+  color: #a78bfa;
+}
+
+/* Textarea */
+.feedback-textarea {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #fff;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 100px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.feedback-textarea:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+}
+
+.feedback-textarea::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* Context info */
+.feedback-context-info {
+  margin-top: 12px;
+  margin-bottom: 8px;
+}
+
+.feedback-context-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Submit button spinner */
+#feedback-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+#feedback-submit .spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(74, 222, 128, 0.3);
+  border-top-color: #4ade80;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+#feedback-submit .spinner.hidden {
+  display: none;
+}
+
+#feedback-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

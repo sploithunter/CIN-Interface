@@ -59,6 +59,7 @@ import { setupDirectoryAutocomplete } from './ui/DirectoryAutocomplete'
 import { checkForUpdates } from './ui/VersionChecker'
 import { drawMode } from './ui/DrawMode'
 import { setupTextLabelModal, showTextLabelModal } from './ui/TextLabelModal'
+import { setupFeedbackModal } from './ui/FeedbackModal'
 import { createSessionAPI, type SessionAPI } from './api'
 
 // ============================================================================
@@ -3492,6 +3493,26 @@ function init() {
 
   // Setup text label modal (for hex text labels)
   setupTextLabelModal()
+
+  // Setup feedback modal (for user feedback/bug reports)
+  setupFeedbackModal({
+    apiUrl: API_URL,
+    getActiveSessionId: () => state.selectedManagedSession,
+    getActiveSessionName: () => {
+      if (!state.selectedManagedSession) return null
+      const session = state.managedSessions.find(s => s.id === state.selectedManagedSession)
+      return session?.name || null
+    },
+    getActiveSessionStatus: () => {
+      if (!state.selectedManagedSession) return null
+      const session = state.managedSessions.find(s => s.id === state.selectedManagedSession)
+      return session?.status || null
+    },
+    getRecentEvents: () => {
+      // Get the last 5 event types
+      return state.eventHistory.slice(-5).map(e => e.type)
+    },
+  })
 
   // Setup zone command modal (quick command input near zone)
   setupZoneCommandModal()

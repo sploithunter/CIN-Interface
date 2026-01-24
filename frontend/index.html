@@ -53,6 +53,11 @@
           </div>
         </div>
 
+        <!-- Feedback Button (bottom-left, above keybinds) -->
+        <button id="feedback-btn" class="feedback-btn" title="Send feedback (F)">
+          <span class="feedback-btn-icon">💬</span>
+        </button>
+
         <!-- Voice Control (center bottom) -->
         <div id="voice-control" class="voice-control">
           <!-- Idle state: mic button with hint -->
@@ -470,6 +475,61 @@
         <p class="zone-timeout-hint">Also ensure your Claude Code is up to date.</p>
         <div class="modal-actions">
           <button type="button" class="modal-btn modal-btn-cancel" id="zone-timeout-close">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feedback Modal -->
+    <div id="feedback-modal">
+      <div class="modal-content feedback-modal-content">
+        <div class="modal-header">
+          <h3>Send Feedback</h3>
+        </div>
+
+        <div class="feedback-type-selector">
+          <label class="feedback-type-option">
+            <input type="radio" name="feedback-type" value="bug" />
+            <span class="feedback-type-label">
+              <span class="feedback-type-icon">🐛</span>
+              <span class="feedback-type-text">Bug</span>
+            </span>
+          </label>
+          <label class="feedback-type-option">
+            <input type="radio" name="feedback-type" value="improve" />
+            <span class="feedback-type-label">
+              <span class="feedback-type-icon">💡</span>
+              <span class="feedback-type-text">Improve</span>
+            </span>
+          </label>
+          <label class="feedback-type-option">
+            <input type="radio" name="feedback-type" value="works" checked />
+            <span class="feedback-type-label">
+              <span class="feedback-type-icon">✨</span>
+              <span class="feedback-type-text">Works!</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="modal-field">
+          <label for="feedback-description">Description</label>
+          <textarea
+            id="feedback-description"
+            class="feedback-textarea"
+            placeholder="What happened? What did you expect?"
+            rows="4"
+          ></textarea>
+        </div>
+
+        <div class="feedback-context-info">
+          <span class="feedback-context-label">A screenshot and context will be included automatically.</span>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="modal-btn modal-btn-cancel" id="feedback-cancel">Cancel</button>
+          <button type="button" class="modal-btn modal-btn-create" id="feedback-submit">
+            <span id="feedback-submit-text">Send Feedback</span>
+            <span id="feedback-submit-spinner" class="spinner hidden"></span>
+          </button>
         </div>
       </div>
     </div>

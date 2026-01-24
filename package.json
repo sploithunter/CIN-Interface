@@ -52,6 +52,7 @@
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
     "coding-agent-bridge": "file:../coding-agent-bridge",
+    "html2canvas": "^1.4.1",
     "three": "^0.170.0",
     "tone": "^15.1.22"
   },

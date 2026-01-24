@@ -23,6 +23,7 @@ import { GitStatusManager } from './GitStatusManager.js';
 import { ProjectsManager } from './ProjectsManager.js';
 import { getCodexWatcher } from './CodexSessionWatcher.js';
 import { createCINSessionManager } from './CINSessionManager.js';
+import { JSONFileFeedbackRepo } from './feedback/index.js';
 import { fileURLToPath } from 'url';
 // Bridge components
 import { createSessionManager, createFileWatcher, createTmuxExecutor, createEventProcessor, ClaudeAdapter, CodexAdapter, } from 'coding-agent-bridge';
@@ -72,6 +73,7 @@ const TMUX_SESSION = process.env.CIN_TMUX_SESSION ?? DEFAULTS.TMUX_SESSION;
 const SESSIONS_FILE = resolve(expandHome(process.env.CIN_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE));
 const METADATA_FILE = resolve(expandHome(process.env.CIN_METADATA_FILE ?? '~/.cin-interface/data/cin-metadata.json'));
 const TILES_FILE = resolve(expandHome(process.env.CIN_TILES_FILE ?? '~/.cin-interface/data/tiles.json'));
+const DATA_DIR = resolve(expandHome('~/.cin-interface/data'));
 /** Time before a "working" session auto-transitions to idle */
 const WORKING_TIMEOUT_MS = 120_000; // 2 minutes
 /** Time before offline internal sessions with dead tmux are auto-cleaned (1 hour) */
@@ -181,6 +183,7 @@ const bypassWarningHandled = new Set();
 const textTiles = new Map();
 const gitStatusManager = new GitStatusManager();
 const projectsManager = new ProjectsManager();
+const feedbackRepo = new JSONFileFeedbackRepo(DATA_DIR);
 const voiceSessions = new Map();
 let deepgramApiKey = null;
 // CINSessionManager wraps bridgeSessionManager and stores CIN-specific metadata
@@ -261,7 +264,10 @@ function initBridgeEventFlow() {
                 const processed = bridgeEventProcessor.processLine(line);
                 if (processed) {
                     // ProcessedEvent has { event: AgentEvent, agentSessionId, ... }
+                    // We need to set sessionId on the event from the extracted agentSessionId
                     const event = processed.event;
+                    event.sessionId = processed.agentSessionId;
+                    event.cwd = processed.cwd || event.cwd || process.cwd();
                     addEvent(event);
                     debug(`[Bridge] New raw event from file: ${event.type}`);
                 }
@@ -1558,7 +1564,10 @@ async function handleHttpRequest(req, res) {
                 // Raw hook event - use EventProcessor
                 const processed = bridgeEventProcessor.processLine(body);
                 if (processed) {
+                    // Set sessionId from extracted agentSessionId
                     const event = processed.event;
+                    event.sessionId = processed.agentSessionId;
+                    event.cwd = processed.cwd || event.cwd || process.cwd();
                     addEvent(event);
                     debug(`Received raw event via HTTP: ${event.type}`);
                 }
@@ -2252,6 +2261,122 @@ async function handleHttpRequest(req, res) {
         else {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: 'Tile not found' }));
+        }
+        return;
+    }
+    // =============================================================================
+    // Feedback Endpoints
+    // =============================================================================
+    // POST /feedback - Create new feedback
+    if (req.method === 'POST' && req.url === '/feedback') {
+        try {
+            const body = await collectRequestBody(req);
+            const input = JSON.parse(body);
+            if (!input.type || !input.description) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Missing type or description' }));
+                return;
+            }
+            const feedback = await feedbackRepo.create(input);
+            log(`Created feedback: ${feedback.id} (${feedback.type})`);
+            res.writeHead(201, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, feedback }));
+        }
+        catch (e) {
+            console.error('Failed to create feedback:', e);
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Invalid request body' }));
+        }
+        return;
+    }
+    // GET /feedback - List all feedback (with optional filters)
+    if (req.method === 'GET' && req.url?.startsWith('/feedback')) {
+        // Parse query params for filtering
+        const urlObj = new URL(req.url, `http://localhost:${PORT}`);
+        // Check for /feedback/unprocessed
+        if (urlObj.pathname === '/feedback/unprocessed') {
+            const feedback = await feedbackRepo.getUnprocessed();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, feedback }));
+            return;
+        }
+        // Check for /feedback/:id (get single feedback)
+        const feedbackIdMatch = urlObj.pathname.match(/^\/feedback\/([a-f0-9-]+)$/);
+        if (feedbackIdMatch) {
+            const feedback = await feedbackRepo.get(feedbackIdMatch[1]);
+            if (feedback) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true, feedback }));
+            }
+            else {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Feedback not found' }));
+            }
+            return;
+        }
+        // GET /feedback - list with optional filters
+        if (urlObj.pathname === '/feedback') {
+            const filter = {};
+            const typeParam = urlObj.searchParams.get('type');
+            if (typeParam && ['bug', 'improve', 'works'].includes(typeParam)) {
+                filter.type = typeParam;
+            }
+            const processedParam = urlObj.searchParams.get('processed');
+            if (processedParam !== null) {
+                filter.processed = processedParam === 'true';
+            }
+            const limitParam = urlObj.searchParams.get('limit');
+            if (limitParam) {
+                filter.limit = parseInt(limitParam, 10);
+            }
+            const offsetParam = urlObj.searchParams.get('offset');
+            if (offsetParam) {
+                filter.offset = parseInt(offsetParam, 10);
+            }
+            const feedback = await feedbackRepo.list(filter);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, feedback }));
+            return;
+        }
+    }
+    // PATCH /feedback/:id - Update feedback (mark processed, link GitHub issue)
+    const feedbackPatchMatch = req.url?.match(/^\/feedback\/([a-f0-9-]+)$/);
+    if (req.method === 'PATCH' && feedbackPatchMatch) {
+        try {
+            const feedbackId = feedbackPatchMatch[1];
+            const body = await collectRequestBody(req);
+            const changes = JSON.parse(body);
+            const feedback = await feedbackRepo.update(feedbackId, changes);
+            if (feedback) {
+                log(`Updated feedback: ${feedback.id}`);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true, feedback }));
+            }
+            else {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Feedback not found' }));
+            }
+        }
+        catch (e) {
+            console.error('Failed to update feedback:', e);
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Invalid request body' }));
+        }
+        return;
+    }
+    // DELETE /feedback/:id - Delete feedback
+    const feedbackDeleteMatch = req.url?.match(/^\/feedback\/([a-f0-9-]+)$/);
+    if (req.method === 'DELETE' && feedbackDeleteMatch) {
+        const feedbackId = feedbackDeleteMatch[1];
+        const deleted = await feedbackRepo.delete(feedbackId);
+        if (deleted) {
+            log(`Deleted feedback: ${feedbackId}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+        }
+        else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Feedback not found' }));
         }
         return;
     }
