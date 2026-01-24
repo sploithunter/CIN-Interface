@@ -354,7 +354,7 @@ describe('Session in Git Repository', () => {
     execSync('git config user.name "Test"', { cwd: tempRepoDir });
     fs.writeFileSync(path.join(tempRepoDir, 'README.md'), '# Test Repo');
     execSync('git add .', { cwd: tempRepoDir });
-    execSync('git commit -m "Initial commit"', { cwd: tempRepoDir });
+    execSync('git commit --no-gpg-sign -m "Initial commit"', { cwd: tempRepoDir });
   });
 
   afterAll(async () => {

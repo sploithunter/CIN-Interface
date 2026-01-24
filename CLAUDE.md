@@ -62,6 +62,69 @@ node bin/cli.js setup-codex
 node bin/cli.js uninstall
 ```
 
+## Getting Started (Development)
+
+### Quick Start
+
+1. **Install dependencies**: `npm install`
+2. **Start the dev server**: `npm run dev`
+   - This runs Vite (frontend) on port 4002 and the API server on port 4003
+   - Hot reload is enabled for both
+3. **Open the interface**: http://localhost:4002 (proxies API to 4003)
+
+### Running Tests
+
+**Important**: Tests require the server to be running on port 4003.
+
+```bash
+# Terminal 1: Start the server
+npm run dev:server
+
+# Terminal 2: Run tests (wait for server to be ready)
+npm test
+```
+
+Or run server-only without Vite frontend:
+```bash
+npm run dev:server  # Just the API server with hot reload
+```
+
+### Common Issues
+
+**Port 4003 already in use:**
+```bash
+lsof -ti :4003 | xargs kill -9
+```
+
+**Tests fail with ECONNREFUSED:**
+- The server isn't running. Start it with `npm run dev:server` first.
+
+**WebSocket rejected (origin: undefined):**
+- WebSocket connections require an `Origin` header. When testing from Node.js:
+```javascript
+const ws = new WebSocket('ws://localhost:4003', {
+  headers: { origin: 'http://localhost:4002' }
+});
+```
+
+**Events not showing up:**
+- Check that hooks are installed: `node bin/cli.js doctor`
+- Events file location: `~/.coding-agent-bridge/data/events.jsonl`
+- Server must be reading from the same events file the hooks write to
+
+### Debug Mode
+
+Enable verbose logging:
+```bash
+CIN_DEBUG=1 npm run dev:server
+```
+
+This shows:
+- Event processing details
+- Session state changes
+- WebSocket connections
+- File watcher activity
+
 ## Architecture
 
 ### System Components

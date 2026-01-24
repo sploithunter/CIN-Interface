@@ -345,7 +345,10 @@ function initBridgeEventFlow(): void {
         const processed = bridgeEventProcessor.processLine(line);
         if (processed) {
           // ProcessedEvent has { event: AgentEvent, agentSessionId, ... }
+          // We need to set sessionId on the event from the extracted agentSessionId
           const event = processed.event as CINEvent;
+          event.sessionId = processed.agentSessionId;
+          event.cwd = processed.cwd || event.cwd || process.cwd();
           addEvent(event);
           debug(`[Bridge] New raw event from file: ${event.type}`);
         } else {
@@ -1847,7 +1850,10 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
         // Raw hook event - use EventProcessor
         const processed = bridgeEventProcessor.processLine(body);
         if (processed) {
+          // Set sessionId from extracted agentSessionId
           const event = processed.event as CINEvent;
+          event.sessionId = processed.agentSessionId;
+          event.cwd = processed.cwd || event.cwd || process.cwd();
           addEvent(event);
           debug(`Received raw event via HTTP: ${event.type}`);
         } else {
