@@ -50,7 +50,9 @@
     "test:e2e:headed": "playwright test --headed",
     "agent:issues": "tsx src/agent/issue-creator.ts",
     "agent:poller": "tsx src/agent/issue-poller.ts",
-    "agent:webhook": "tsx src/agent/issue-worker.ts"
+    "agent:webhook": "tsx src/agent/issue-worker.ts",
+    "agents:start": "./scripts/start-agents.sh",
+    "agents:stop": "./scripts/start-agents.sh --stop"
   },
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
