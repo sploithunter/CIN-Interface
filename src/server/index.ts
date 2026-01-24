@@ -32,6 +32,7 @@ import { DEFAULTS } from '../shared/defaults.js';
 import { GitStatusManager } from './GitStatusManager.js';
 import { ProjectsManager } from './ProjectsManager.js';
 import { CodexSessionWatcher, getCodexWatcher } from './CodexSessionWatcher.js';
+import { CINSessionManager, createCINSessionManager } from './CINSessionManager.js';
 import { fileURLToPath } from 'url';
 
 // Bridge components
@@ -62,6 +63,7 @@ import type {
   WSMessage,
   TerminalInfo,
   AgentType,
+  CINSessionMetadata,
 } from '../shared/types.js';
 
 // =============================================================================
@@ -111,11 +113,14 @@ const PENDING_PROMPT_FILE = resolve(
   expandHome(process.env.CIN_PROMPT_FILE ?? '~/.cin-interface/data/pending-prompt.txt')
 );
 const MAX_EVENTS = parseInt(process.env.CIN_MAX_EVENTS ?? String(DEFAULTS.MAX_EVENTS), 10);
-const DEBUG = process.env.CIN_DEBUG === 'true';
+const DEBUG = process.env.CIN_DEBUG === '1' || process.env.CIN_DEBUG === 'true';
 const TRACE = process.env.CIN_TRACE === 'true'; // Verbose event field detection logging
 const TMUX_SESSION = process.env.CIN_TMUX_SESSION ?? DEFAULTS.TMUX_SESSION;
 const SESSIONS_FILE = resolve(
   expandHome(process.env.CIN_SESSIONS_FILE ?? DEFAULTS.SESSIONS_FILE)
+);
+const METADATA_FILE = resolve(
+  expandHome(process.env.CIN_METADATA_FILE ?? '~/.cin-interface/data/cin-metadata.json')
 );
 const TILES_FILE = resolve(expandHome(process.env.CIN_TILES_FILE ?? '~/.cin-interface/data/tiles.json'));
 
@@ -245,7 +250,6 @@ let lastTmuxHash = '';
 
 const pendingPermissions = new Map<string, PermissionPrompt>();
 const bypassWarningHandled = new Set<string>();
-const managedSessions = new Map<string, ManagedSession>();
 const textTiles = new Map<string, TextTile>();
 
 const gitStatusManager = new GitStatusManager();
@@ -254,8 +258,9 @@ const projectsManager = new ProjectsManager();
 const voiceSessions = new Map<WebSocket, LiveClient>();
 let deepgramApiKey: string | null = null;
 
-const claudeToManagedMap = new Map<string, string>();
-let sessionCounter = 0;
+// CINSessionManager wraps bridgeSessionManager and stores CIN-specific metadata
+// Will be initialized after bridgeSessionManager is created
+let cinSessionManager: CINSessionManager;
 
 // =============================================================================
 // Bridge Components (from coding-agent-bridge)
@@ -275,6 +280,14 @@ const bridgeSessionManager = createSessionManager({
 // Register agent adapters
 bridgeSessionManager.registerAdapter(ClaudeAdapter);
 bridgeSessionManager.registerAdapter(CodexAdapter);
+
+// Create CINSessionManager wrapper
+cinSessionManager = createCINSessionManager(bridgeSessionManager, {
+  metadataFile: METADATA_FILE,
+  gitStatusManager,
+  projectsManager,
+  debug: DEBUG,
+});
 
 // File watcher monitors events.jsonl for new events
 const bridgeFileWatcher = createFileWatcher(EVENTS_FILE, {
@@ -300,39 +313,76 @@ function initBridgeEventFlow(): void {
   // Use EventProcessor to transform raw hook events (hook_event_name) to normalized events (type)
   bridgeFileWatcher.on('line', (line: string) => {
     try {
-      // Process through EventProcessor to transform hook_event_name -> type
-      const processed = bridgeEventProcessor.processLine(line);
-      if (processed) {
-        // ProcessedEvent has { event: AgentEvent, agentSessionId, ... }
-        const event = processed.event as CINEvent;
+      const parsed = JSON.parse(line);
+
+      // Check if this is an already-normalized event (has 'type' field with valid value)
+      // or a raw hook event (has 'hook_event_name' field)
+      const validTypes = [
+        'pre_tool_use',
+        'post_tool_use',
+        'stop',
+        'subagent_stop',
+        'session_start',
+        'session_end',
+        'user_prompt_submit',
+        'notification',
+      ];
+
+      if (parsed.type && validTypes.includes(parsed.type)) {
+        // Already normalized event - use directly
+        const event: CINEvent = {
+          id: parsed.id || `file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          type: parsed.type,
+          timestamp: parsed.timestamp || Date.now(),
+          sessionId: parsed.sessionId || '',
+          cwd: parsed.cwd || process.cwd(),
+          ...parsed,
+        };
         addEvent(event);
-        debug(`[Bridge] New event from file: ${event.type}`);
+        debug(`[Bridge] New normalized event from file: ${event.type}`);
       } else {
-        debug(`[Bridge] EventProcessor returned null for: ${line.substring(0, 100)}`);
+        // Raw hook event - use EventProcessor
+        const processed = bridgeEventProcessor.processLine(line);
+        if (processed) {
+          // ProcessedEvent has { event: AgentEvent, agentSessionId, ... }
+          const event = processed.event as CINEvent;
+          addEvent(event);
+          debug(`[Bridge] New raw event from file: ${event.type}`);
+        } else {
+          debug(`[Bridge] EventProcessor returned null for: ${line.substring(0, 100)}`);
+        }
       }
     } catch (e) {
       debug(`[Bridge] Failed to parse event: ${line.substring(0, 100)}`);
     }
   });
 
-  // Listen for session changes from bridge SessionManager
-  bridgeSessionManager.on('session:created', (session) => {
-    debug(`[Bridge] Session created: ${session.name} (${session.id})`);
-    // TODO: Sync with managedSessions once fully integrated
+  // Listen for session changes from CINSessionManager (which wraps bridgeSessionManager)
+  cinSessionManager.on('session:created', (session) => {
+    debug(`[CIN] Session created: ${session.name} (${session.id})`);
+    broadcastSessions();
   });
 
-  bridgeSessionManager.on('session:status', (session, from, to) => {
-    debug(`[Bridge] Session ${session.name}: ${from} -> ${to}`);
-    // TODO: Sync with managedSessions once fully integrated
+  cinSessionManager.on('session:updated', (session, changes) => {
+    debug(`[CIN] Session updated: ${session.name} - ${JSON.stringify(changes)}`);
+    broadcastSessions();
+    cinSessionManager.saveMetadata();
   });
 
-  bridgeSessionManager.on('session:deleted', (session) => {
-    debug(`[Bridge] Session deleted: ${session.name} (${session.id})`);
-    // TODO: Sync with managedSessions once fully integrated
+  cinSessionManager.on('session:status', (session, from, to) => {
+    debug(`[CIN] Session ${session.name}: ${from} -> ${to}`);
+    broadcastSessions();
+    cinSessionManager.saveMetadata();
   });
 
-  bridgeSessionManager.on('error', (error) => {
-    console.error('[Bridge] SessionManager error:', error);
+  cinSessionManager.on('session:deleted', (session) => {
+    debug(`[CIN] Session deleted: ${session.name} (${session.id})`);
+    broadcastSessions();
+    cinSessionManager.saveMetadata();
+  });
+
+  cinSessionManager.on('error', (error) => {
+    console.error('[CIN] SessionManager error:', error);
   });
 
   bridgeFileWatcher.on('error', (error) => {
@@ -350,13 +400,18 @@ async function startBridge(): Promise<void> {
   await bridgeSessionManager.start();
   log('[Bridge] SessionManager started');
 
+  // Start CIN session manager (loads metadata)
+  await cinSessionManager.start();
+  log('[CIN] CINSessionManager started');
+
+  // Wire up event flow BEFORE starting file watcher
+  // Event handlers must be attached before start() to avoid missing events
+  initBridgeEventFlow();
+  log('[Bridge] Event flow wired');
+
   // Start file watcher
   await bridgeFileWatcher.start();
   log('[Bridge] FileWatcher started');
-
-  // Wire up event flow
-  initBridgeEventFlow();
-  log('[Bridge] Event flow wired');
 }
 
 /**
@@ -365,6 +420,7 @@ async function startBridge(): Promise<void> {
 async function stopBridge(): Promise<void> {
   log('[Bridge] Stopping bridge components...');
   await bridgeFileWatcher.stop();
+  await cinSessionManager.stop();
   await bridgeSessionManager.stop();
   log('[Bridge] Bridge stopped');
 }
@@ -471,13 +527,14 @@ async function pollTokens(tmuxSession: string): Promise<void> {
 
 function startTokenPolling(): void {
   setInterval(() => {
-    for (const session of managedSessions.values()) {
+    const sessions = cinSessionManager.listSessions();
+    for (const session of sessions) {
       // Only poll internal sessions (they have tmuxSession)
       if (session.status !== 'offline' && session.tmuxSession) {
         pollTokens(session.tmuxSession);
       }
     }
-    if (!managedSessions.size) {
+    if (sessions.length === 0) {
       pollTokens(TMUX_SESSION);
     }
   }, 2000);
@@ -605,10 +662,10 @@ async function pollPermissions(sessionId: string, tmuxSession: string): Promise<
         },
       });
 
-      const session = managedSessions.get(sessionId);
+      const session = cinSessionManager.getSession(sessionId);
       if (session) {
-        session.status = 'waiting';
-        session.currentTool = prompt.tool;
+        cinSessionManager.updateSessionStatus(sessionId, 'waiting');
+        cinSessionManager.updateSessionTool(sessionId, prompt.tool);
         broadcastSessions();
       }
     } else if (!prompt && existing) {
@@ -620,10 +677,10 @@ async function pollPermissions(sessionId: string, tmuxSession: string): Promise<
         payload: { sessionId },
       });
 
-      const session = managedSessions.get(sessionId);
+      const session = cinSessionManager.getSession(sessionId);
       if (session && session.status === 'waiting') {
-        session.status = 'working';
-        session.currentTool = undefined;
+        cinSessionManager.updateSessionStatus(sessionId, 'working');
+        cinSessionManager.updateSessionTool(sessionId, undefined);
         broadcastSessions();
       }
     }
@@ -634,7 +691,8 @@ async function pollPermissions(sessionId: string, tmuxSession: string): Promise<
 
 function startPermissionPolling(): void {
   setInterval(() => {
-    for (const session of managedSessions.values()) {
+    const sessions = cinSessionManager.listSessions();
+    for (const session of sessions) {
       // Only poll internal sessions (they have tmuxSession)
       if (session.status !== 'offline' && session.tmuxSession) {
         pollPermissions(session.id, session.tmuxSession);
@@ -645,7 +703,7 @@ function startPermissionPolling(): void {
 }
 
 function sendPermissionResponse(sessionId: string, optionNumber: string): boolean {
-  const session = managedSessions.get(sessionId);
+  const session = cinSessionManager.getSession(sessionId);
   if (!session) {
     log(`Cannot send permission response: session ${sessionId} not found`);
     return false;
@@ -673,8 +731,8 @@ function sendPermissionResponse(sessionId: string, optionNumber: string): boolea
     .then(() => {
       log(`Sent permission response to ${session.name}: option ${optionNumber}`);
       pendingPermissions.delete(sessionId);
-      session.status = 'working';
-      session.currentTool = undefined;
+      cinSessionManager.updateSessionStatus(sessionId, 'working');
+      cinSessionManager.updateSessionTool(sessionId, undefined);
       broadcastSessions();
     })
     .catch((error: Error) => {
@@ -741,14 +799,14 @@ async function pollSuggestions(sessionId: string, tmuxSession: string): Promise<
   try {
     const stdout = await bridgeTmux.capturePane(tmuxSession, { start: -20 });
 
-    const session = managedSessions.get(sessionId);
+    const session = cinSessionManager.getSession(sessionId);
     if (!session) return;
 
     // Only look for suggestions when session is waiting or idle
     // (sessions may timeout to idle while still waiting for input)
     if (session.status !== 'waiting' && session.status !== 'idle') {
       if (session.suggestion) {
-        session.suggestion = undefined;
+        cinSessionManager.updateMetadata(sessionId, { suggestion: undefined });
         broadcastSessions();
       }
       return;
@@ -758,7 +816,7 @@ async function pollSuggestions(sessionId: string, tmuxSession: string): Promise<
 
     // Update if suggestion changed
     if (suggestion !== session.suggestion) {
-      session.suggestion = suggestion || undefined;
+      cinSessionManager.updateMetadata(sessionId, { suggestion: suggestion || undefined });
       debug(`Suggestion for ${session.name}: ${suggestion || '(none)'}`);
       broadcastSessions();
     }
@@ -769,7 +827,8 @@ async function pollSuggestions(sessionId: string, tmuxSession: string): Promise<
 
 function startSuggestionPolling(): void {
   setInterval(() => {
-    for (const session of managedSessions.values()) {
+    const sessions = cinSessionManager.listSessions();
+    for (const session of sessions) {
       // Poll for suggestions in both 'waiting' and 'idle' sessions
       // (idle sessions may have timed out but still be waiting for input)
       // Only internal sessions have tmux to poll from
@@ -791,7 +850,8 @@ const AUTO_ACCEPT_COOLDOWN_MS = 3000; // 3 second cooldown between auto-accepts
 
 function startRalphWiggumPolling(): void {
   setInterval(() => {
-    for (const session of managedSessions.values()) {
+    const sessions = cinSessionManager.listSessions();
+    for (const session of sessions) {
       // Check if Ralph Wiggum mode is enabled for this session
       if (!session.autoAccept) continue;
 
@@ -809,11 +869,11 @@ function startRalphWiggumPolling(): void {
       log(`[Ralph Wiggum] Auto-accepting suggestion for ${session.name}: "${session.suggestion.slice(0, 50)}..."`);
       lastAutoAcceptTime.set(session.id, now);
 
-      sendPromptToSession(session.id, session.suggestion).then((result) => {
+      cinSessionManager.sendPrompt(session.id, session.suggestion).then((result) => {
         if (result.ok) {
           // Clear the suggestion so we don't send it again
-          session.suggestion = undefined;
-          session.status = 'working';
+          cinSessionManager.updateMetadata(session.id, { suggestion: undefined });
+          cinSessionManager.updateSessionStatus(session.id, 'working');
           broadcastSessions();
         } else {
           log(`[Ralph Wiggum] Failed to auto-accept for ${session.name}: ${result.error}`);
@@ -945,181 +1005,63 @@ function focusExternalTerminal(terminalInfo: TerminalInfo): void {
 }
 
 async function createSession(options: CreateSessionOptions = {}): Promise<ManagedSession> {
-  const id = randomUUID();
-  sessionCounter++;
-  const tmuxSession = `cin-${shortId()}`;
-
+  // Validate cwd
   const cwd = validateDirectoryPath(options.cwd || process.cwd());
-
-  // Default name to the directory name (project name)
-  const name = options.name || basename(cwd);
-  const agent: AgentType = options.agent || 'claude';
   const flags = options.flags || {};
 
-  // Build command based on agent type
-  let agentCmd: string;
-  if (agent === 'codex') {
-    // Codex CLI command
-    const codexArgs: string[] = [];
-
-    // Handle model selection (e.g., 'gpt-5.2-codex-high', 'o3')
-    if (flags.model) {
-      codexArgs.push(`--model=${flags.model}`);
-    }
-
-    // Handle skipPermissions - maps to Codex's most permissive mode
-    if (flags.skipPermissions === true) {
-      codexArgs.push('--dangerously-bypass-approvals-and-sandbox');
-    } else if (flags.fullAuto === true || (flags.fullAuto !== false && !flags.sandbox && !flags.approval)) {
-      // Default to --full-auto for convenience unless specific flags are set
-      codexArgs.push('--full-auto');
-    } else {
-      // Fine-grained control via sandbox and approval flags
-      if (flags.sandbox) {
-        codexArgs.push(`--sandbox=${flags.sandbox}`);
-      }
-      if (flags.approval) {
-        codexArgs.push(`--ask-for-approval=${flags.approval}`);
-      }
-    }
-
-    agentCmd = codexArgs.length > 0 ? `codex ${codexArgs.join(' ')}` : 'codex';
-  } else {
-    // Claude CLI command
-    const claudeArgs: string[] = [];
-    // Don't use -c by default - each new session should start fresh
-    // Otherwise it might continue an existing conversation (like this one!)
-    if (flags.continue === true) {
-      claudeArgs.push('-c');
-    }
-    if (flags.skipPermissions !== false) {
-      claudeArgs.push('--permission-mode=bypassPermissions');
-      claudeArgs.push('--dangerously-skip-permissions');
-    }
-    if (flags.chrome) {
-      claudeArgs.push('--chrome');
-    }
-    agentCmd = claudeArgs.length > 0 ? `claude ${claudeArgs.join(' ')}` : 'claude';
-  }
-
-  // Use bridge's createSession which handles the two-step approach:
-  // 1. Create empty session with new-session
-  // 2. Send command with send-keys + Enter
   try {
-    await bridgeTmux.createSession(tmuxSession, { cwd, command: agentCmd });
-
-    const session: ManagedSession = {
-      id,
-      name,
-      type: 'internal',
-      agent,
-      tmuxSession,
-      status: 'idle',
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
+    // Delegate to cinSessionManager
+    const session = await cinSessionManager.createSession({
+      ...options,
       cwd,
-      zonePosition: options.zonePosition,
-    };
+    });
 
-    managedSessions.set(id, session);
-    log(`Created ${agent} session: ${name} (${id.slice(0, 8)}) -> tmux:${tmuxSession}`);
-
-    if (cwd) {
-      gitStatusManager.track(id, cwd);
-      projectsManager.addProject(cwd, name);
-    }
+    log(`Created ${session.agent} session: ${session.name} (${session.id.slice(0, 8)}) -> tmux:${session.tmuxSession}`);
 
     // Open Terminal.app attached to the tmux session (default: true)
-    if (flags.openTerminal !== false) {
-      openTerminalForTmux(tmuxSession);
+    if (flags.openTerminal !== false && session.tmuxSession) {
+      openTerminalForTmux(session.tmuxSession);
     }
 
     broadcastSessions();
-    saveSessions();
     return session;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(`Failed to create session: ${message}`);
-    // Try to kill the session in case it was partially created
-    bridgeTmux.killSession(tmuxSession).catch(() => {});
     throw new Error(`Failed to create session: ${message}`);
   }
 }
 
 function getSessions(): ManagedSession[] {
-  return Array.from(managedSessions.values()).map((session) => ({
-    ...session,
-    gitStatus: gitStatusManager.getStatus(session.id) ?? undefined,
-  })) as ManagedSession[];
+  // cinSessionManager.listSessions() already includes gitStatus via mergeMetadata
+  return cinSessionManager.listSessions();
 }
 
 function getSession(id: string): ManagedSession | undefined {
-  return managedSessions.get(id);
+  return cinSessionManager.getSession(id);
 }
 
 function updateSession(
   id: string,
   updates: { name?: string; zonePosition?: ZonePosition | null; autoAccept?: boolean }
 ): ManagedSession | null {
-  const session = managedSessions.get(id);
-  if (!session) return null;
+  const updated = cinSessionManager.updateSession(id, updates);
+  if (!updated) return null;
 
-  if (updates.name) {
-    session.name = updates.name;
-  }
-  // Allow setting zonePosition to place/unplace sessions
-  // null = unplace (remove from grid), object = place at position
-  if ('zonePosition' in updates) {
-    session.zonePosition = updates.zonePosition ?? undefined;
-  }
-  if (typeof updates.autoAccept === 'boolean') {
-    session.autoAccept = updates.autoAccept;
-  }
-
-  log(`Updated session: ${session.name} (${id.slice(0, 8)})`);
+  log(`Updated session: ${updated.name} (${id.slice(0, 8)})`);
   broadcastSessions();
-  saveSessions();
-  return session;
+  return updated;
 }
 
 async function deleteSession(id: string): Promise<boolean> {
-  const session = managedSessions.get(id);
+  const session = cinSessionManager.getSession(id);
   if (!session) {
     return false;
   }
 
-  const cleanup = () => {
-    managedSessions.delete(id);
-    gitStatusManager.untrack(id);
-
-    for (const [claudeId, managedId] of claudeToManagedMap) {
-      if (managedId === id) {
-        claudeToManagedMap.delete(claudeId);
-      }
-    }
-
-    log(`Deleted session: ${session.name} (${id.slice(0, 8)})`);
-    broadcastSessions();
-    saveSessions();
-  };
-
-  // External sessions have no tmux to kill
-  if (!session.tmuxSession) {
-    cleanup();
-    return true;
-  }
-
-  try {
-    validateTmuxSession(session.tmuxSession);
-  } catch {
-    log(`Invalid tmux session name: ${session.tmuxSession}`);
-    cleanup(); // Still clean up the session record
-    return true;
-  }
-
   // On macOS, get the Terminal window ID before killing tmux so we can close it
   let terminalWindowId: string | null = null;
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && session.tmuxSession) {
     try {
       const result = execSync(`osascript -e '
         tell application "Terminal"
@@ -1138,11 +1080,14 @@ async function deleteSession(id: string): Promise<boolean> {
     }
   }
 
-  // Kill the tmux session using bridge
-  const killed = await bridgeTmux.killSession(session.tmuxSession);
-  if (!killed) {
-    log(`Warning: Failed to kill tmux session: ${session.tmuxSession}`);
+  // Delegate deletion to cinSessionManager (which handles tmux cleanup via bridge)
+  const deleted = await cinSessionManager.deleteSession(id);
+  if (!deleted) {
+    log(`Warning: Failed to delete session: ${id}`);
+    return false;
   }
+
+  log(`Deleted session: ${session.name} (${id.slice(0, 8)})`);
 
   // On macOS, close the Terminal window that was attached to this session
   // Add a small delay to let the tmux detach complete before closing Terminal
@@ -1157,7 +1102,7 @@ async function deleteSession(id: string): Promise<boolean> {
     }, 500);
   }
 
-  cleanup();
+  broadcastSessions();
   return true;
 }
 
@@ -1186,127 +1131,48 @@ async function sendPromptToSession(
   prompt: string,
   images?: PromptImage[]
 ): Promise<{ ok: boolean; error?: string; imagePaths?: string[] }> {
-  const session = managedSessions.get(id);
-  if (!session) {
-    return { ok: false, error: 'Session not found' };
-  }
+  // Delegate to cinSessionManager which handles image preprocessing
+  const result = await cinSessionManager.sendPrompt(id, prompt, images);
 
-  // Process images if provided - save to temp files in session's cwd
-  const savedImagePaths: string[] = [];
-  if (images && images.length > 0) {
-    const imageDir = join(session.cwd, '.cin-images');
-    if (!existsSync(imageDir)) {
-      mkdirSync(imageDir, { recursive: true });
-    }
-
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      const ext = img.mediaType.split('/')[1] || 'png';
-      const filename = img.name || `image-${Date.now()}-${i}.${ext}`;
-      const imagePath = join(imageDir, filename);
-
-      try {
-        // Decode base64 and write to file
-        const buffer = Buffer.from(img.data, 'base64');
-        writeFileSync(imagePath, buffer);
-        savedImagePaths.push(imagePath);
-        log(`Saved image: ${imagePath} (${(buffer.length / 1024).toFixed(1)}KB)`);
-      } catch (e) {
-        log(`Failed to save image ${filename}: ${(e as Error).message}`);
-      }
+  if (result.ok) {
+    const session = cinSessionManager.getSession(id);
+    log(`Prompt sent to ${session?.name || id}: ${prompt.slice(0, 50)}...`);
+    if (result.imagePaths && result.imagePaths.length > 0) {
+      log(`Prompt includes ${result.imagePaths.length} image(s)`);
     }
   }
 
-  // Build the full prompt with image references
-  let fullPrompt = prompt;
-  if (savedImagePaths.length > 0) {
-    const imageRefs = savedImagePaths.map(p => `[Image: ${p}]`).join('\n');
-    fullPrompt = `${imageRefs}\n\n${prompt}`;
-    log(`Prompt includes ${savedImagePaths.length} image(s)`);
-  }
-
-  // Internal sessions use their managed tmux session
-  if (session.tmuxSession) {
-    try {
-      await sendToTmuxSafe(session.tmuxSession, fullPrompt);
-      session.lastActivity = Date.now();
-      log(`Prompt sent to ${session.name}: ${prompt.slice(0, 50)}...`);
-      return { ok: true, imagePaths: savedImagePaths.length > 0 ? savedImagePaths : undefined };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      log(`Failed to send prompt to ${session.name}: ${msg}`);
-      return { ok: false, error: msg };
-    }
-  }
-
-  // External sessions - try to use captured terminal info
-  if (session.terminal?.tmuxPane) {
-    try {
-      await sendToTmuxPane(session.terminal.tmuxPane, session.terminal.tmuxSocket, fullPrompt);
-      session.lastActivity = Date.now();
-      log(`Prompt sent to external ${session.name} via tmux pane ${session.terminal.tmuxPane}: ${prompt.slice(0, 50)}...`);
-      return { ok: true, imagePaths: savedImagePaths.length > 0 ? savedImagePaths : undefined };
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      log(`Failed to send prompt to external ${session.name}: ${msg}`);
-      return { ok: false, error: msg };
-    }
-  }
-
-  return { ok: false, error: 'Cannot send prompts to this external session (no tmux pane info)' };
+  return result;
 }
 
 /**
  * Check if tmux sessions are still alive.
- * Uses bridge's TmuxExecutor for session listing.
+ * Note: bridgeSessionManager already handles this via its health checks,
+ * but we keep this for additional broadcast triggers.
  */
 async function checkSessionHealth(): Promise<void> {
-  try {
-    const tmuxSessions = await bridgeTmux.listSessions();
-    const activeSessions = new Set(tmuxSessions.map((s) => s.name));
-    let changed = false;
-
-    for (const session of managedSessions.values()) {
-      // Skip external sessions (they don't have tmux)
-      if (!session.tmuxSession) continue;
-
-      const isAlive = activeSessions.has(session.tmuxSession);
-      const newStatus: SessionStatus = isAlive
-        ? session.status === 'offline'
-          ? 'idle'
-          : session.status
-        : 'offline';
-      if (session.status !== newStatus) {
-        session.status = newStatus;
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      broadcastSessions();
-      saveSessions();
-    }
-  } catch {
-    // Mark only internal sessions as offline (external sessions don't use tmux)
-    for (const session of managedSessions.values()) {
-      if (session.tmuxSession && session.status !== 'offline') {
-        session.status = 'offline';
-      }
-    }
-  }
+  // bridgeSessionManager already handles tmux health checks
+  // Just trigger a broadcast to ensure UI is in sync
+  broadcastSessions();
 }
 
+/**
+ * Check for sessions stuck in working state.
+ * Note: bridgeSessionManager already handles this via its working timeout checks,
+ * but we keep this for additional broadcast triggers and logging.
+ */
 function checkWorkingTimeout(): void {
   const now = Date.now();
   let changed = false;
 
-  for (const session of managedSessions.values()) {
+  const sessions = cinSessionManager.listSessions();
+  for (const session of sessions) {
     if (session.status === 'working') {
       const timeSinceActivity = now - session.lastActivity;
       if (timeSinceActivity > WORKING_TIMEOUT_MS) {
         log(`Session "${session.name}" timed out after ${Math.round(timeSinceActivity / 1000)}s`);
-        session.status = 'idle';
-        session.currentTool = undefined;
+        cinSessionManager.updateSessionStatus(session.id, 'idle');
+        cinSessionManager.updateSessionTool(session.id, undefined);
         changed = true;
       }
     }
@@ -1314,7 +1180,6 @@ function checkWorkingTimeout(): void {
 
   if (changed) {
     broadcastSessions();
-    saveSessions();
   }
 }
 
@@ -1331,7 +1196,8 @@ function checkCodexSessionHealth(): void {
 
   let changed = false;
 
-  for (const session of managedSessions.values()) {
+  const sessions = cinSessionManager.listSessions();
+  for (const session of sessions) {
     // Only check EXTERNAL Codex sessions - never auto-offline internal sessions
     // Internal sessions could have unsaved work or background processes
     if (session.agent === 'codex' &&
@@ -1346,8 +1212,8 @@ function checkCodexSessionHealth(): void {
 
       if (!isActive) {
         log(`Codex session "${session.name}" marked offline (file inactive for 5+ min)`);
-        session.status = 'offline';
-        session.currentTool = undefined;
+        cinSessionManager.updateSessionStatus(session.id, 'offline');
+        cinSessionManager.updateSessionTool(session.id, undefined);
         changed = true;
       }
     }
@@ -1355,7 +1221,6 @@ function checkCodexSessionHealth(): void {
 
   if (changed) {
     broadcastSessions();
-    saveSessions();
   }
 }
 
@@ -1377,7 +1242,8 @@ async function cleanupStaleOfflineSessions(): Promise<void> {
     activeTmuxSessions = new Set<string>();
   }
 
-  for (const session of managedSessions.values()) {
+  const allSessions = cinSessionManager.listSessions();
+  for (const session of allSessions) {
     if (session.status !== 'offline') {
       continue;
     }
@@ -1417,81 +1283,9 @@ async function cleanupStaleOfflineSessions(): Promise<void> {
   }
 }
 
-interface SavedSessionsData {
-  sessions: ManagedSession[];
-  claudeToManagedMap: [string, string][];
-  codexToManagedMap?: [string, string][];
-  sessionCounter: number;
-}
-
-function saveSessions(): void {
-  try {
-    const data: SavedSessionsData = {
-      sessions: Array.from(managedSessions.values()),
-      claudeToManagedMap: Array.from(claudeToManagedMap.entries()),
-      codexToManagedMap: Array.from(codexToManagedMap.entries()),
-      sessionCounter,
-    };
-    writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
-    debug(`Saved ${managedSessions.size} sessions to ${SESSIONS_FILE}`);
-  } catch (e) {
-    console.error('Failed to save sessions:', e);
-  }
-}
-
-function loadSessions(): void {
-  if (!existsSync(SESSIONS_FILE)) {
-    debug('No saved sessions file found');
-    return;
-  }
-
-  try {
-    const content = readFileSync(SESSIONS_FILE, 'utf-8');
-    const data: SavedSessionsData = JSON.parse(content);
-
-    if (Array.isArray(data.sessions)) {
-      for (const session of data.sessions) {
-        session.status = 'offline';
-        session.currentTool = undefined;
-
-        // Migrate old sessions: if they have tmuxSession, they're internal
-        if (!session.type) {
-          session.type = session.tmuxSession ? 'internal' : 'external';
-        }
-
-        // Migrate old sessions: default agent to 'claude' if not set
-        if (!session.agent) {
-          session.agent = session.codexThreadId ? 'codex' : 'claude';
-        }
-
-        managedSessions.set(session.id, session);
-        if (session.cwd) {
-          gitStatusManager.track(session.id, session.cwd);
-        }
-      }
-    }
-
-    if (Array.isArray(data.claudeToManagedMap)) {
-      for (const [claudeId, managedId] of data.claudeToManagedMap) {
-        claudeToManagedMap.set(claudeId, managedId);
-      }
-    }
-
-    if (Array.isArray(data.codexToManagedMap)) {
-      for (const [threadId, managedId] of data.codexToManagedMap) {
-        codexToManagedMap.set(threadId, managedId);
-      }
-    }
-
-    if (typeof data.sessionCounter === 'number') {
-      sessionCounter = data.sessionCounter;
-    }
-
-    log(`Loaded ${managedSessions.size} sessions from ${SESSIONS_FILE}`);
-  } catch (e) {
-    console.error('Failed to load sessions:', e);
-  }
-}
+// Note: Session persistence is now handled by bridgeSessionManager + cinSessionManager.
+// bridgeSessionManager persists core session state to ~/.cin-interface/data/sessions.json
+// cinSessionManager persists CIN-specific metadata to ~/.cin-interface/data/cin-metadata.json
 
 function broadcastSessions(): void {
   const sessions = getSessions();
@@ -1642,197 +1436,41 @@ function sendVoiceAudio(ws: WebSocket, audioData: Buffer): void {
 // Session Linking
 // =============================================================================
 
-function linkClaudeSession(claudeSessionId: string, managedSessionId: string): void {
-  claudeToManagedMap.set(claudeSessionId, managedSessionId);
-  const session = managedSessions.get(managedSessionId);
-  if (session) {
-    session.claudeSessionId = claudeSessionId;
-    log(`Linked Claude session ${claudeSessionId.slice(0, 8)} to ${session.name}`);
-    saveSessions();
-  }
-}
-
-function findManagedSession(claudeSessionId: string, _eventCwd?: string): ManagedSession | undefined {
-  // 1. Direct lookup via claudeToManagedMap
-  const managedId = claudeToManagedMap.get(claudeSessionId);
-  if (managedId) {
-    return managedSessions.get(managedId);
-  }
-
-  // 2. Try to find by existing claudeSessionId on sessions
-  for (const session of managedSessions.values()) {
-    if (session.claudeSessionId === claudeSessionId) {
-      // Re-establish the map entry
-      claudeToManagedMap.set(claudeSessionId, session.id);
-      return session;
-    }
-  }
-
-  // NOTE: We intentionally do NOT fall back to CWD matching here.
-  // This keeps internal (tmux-managed) and external sessions separate.
-  // External sessions are auto-created in findOrCreateExternalSession().
-
-  return undefined;
-}
-
-/**
- * Find existing session or auto-create an external session for unknown Claude sessions.
- * External sessions appear in the sidebar but are not placed on the 3D grid initially.
- */
-function findOrCreateExternalSession(claudeSessionId: string, eventCwd: string, terminalInfo?: TerminalInfo): ManagedSession {
-  // First try normal lookup by Claude session ID
-  const existing = findManagedSession(claudeSessionId);
-  if (existing) {
-    // Update terminal info if provided (e.g., from session_start event)
-    if (terminalInfo && existing.type === 'external') {
-      existing.terminal = terminalInfo;
-      if (terminalInfo.tmuxPane) {
-        log(`Updated terminal info for ${existing.name}: tmux pane ${terminalInfo.tmuxPane}`);
-      }
-    }
-    return existing;
-  }
-
-  // Check if there's an internal session with matching CWD that doesn't have a Claude ID yet.
-  // This handles the case where we just created an internal session and Claude is starting up.
-  for (const session of managedSessions.values()) {
-    if (session.type === 'internal' &&
-        session.cwd === eventCwd &&
-        !session.claudeSessionId) {
-      // Link this Claude session to the internal session
-      session.claudeSessionId = claudeSessionId;
-      claudeToManagedMap.set(claudeSessionId, session.id);
-      log(`Linked Claude session ${claudeSessionId.slice(0, 8)} to internal session ${session.name}`);
-      saveSessions();
-      return session;
-    }
-  }
-
-  // Auto-create external session for this unknown Claude session
-  const id = randomUUID();
-  const dirName = eventCwd.split('/').pop() || 'External';
-
-  const session: ManagedSession = {
-    id,
-    name: dirName,
-    type: 'external',
-    agent: 'claude',
-    // No tmuxSession for external sessions
-    status: 'working',
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
-    cwd: eventCwd,
-    claudeSessionId,
-    terminal: terminalInfo,
-    // No zonePosition - external sessions are unplaced initially
-  };
-
-  managedSessions.set(id, session);
-  claudeToManagedMap.set(claudeSessionId, id);
-
-  const tmuxInfo = terminalInfo?.tmuxPane ? ` (tmux: ${terminalInfo.tmuxPane})` : '';
-  log(`Auto-created external session: ${session.name} (Claude: ${claudeSessionId.slice(0, 8)})${tmuxInfo}`);
-  broadcastSessions();
-  saveSessions();
-
-  return session;
-}
-
-// =============================================================================
-// Codex Session Management
-// =============================================================================
-
-/** Map of Codex thread IDs to managed session IDs */
-const codexToManagedMap = new Map<string, string>();
+// Session linking is now handled by cinSessionManager.findOrCreateSession()
+// which delegates to bridgeSessionManager.findOrCreateSession()
 
 /** Reference to Codex watcher for session health checks */
 let codexWatcherInstance: CodexSessionWatcher | null = null;
 
 /**
- * Find existing session or auto-create a session for Codex threads.
- * Also updates session cwd/name if the event has better info.
+ * Find or create a session for an event.
+ * Delegates to cinSessionManager which handles session linking.
  */
-function findOrCreateCodexSession(codexThreadId: string, eventCwd: string, name?: string): ManagedSession {
-  // Helper to update session if we have better cwd info
-  const maybeUpdateSession = (session: ManagedSession): ManagedSession => {
-    // Update cwd and name if the event has a real path and session has default name
-    if (eventCwd && eventCwd !== session.cwd) {
-      const newDirName = eventCwd.split('/').pop() || 'Codex';
-      // Only update name if it's still the default "Codex Session"
-      if (session.name === 'Codex Session' || session.name === 'Codex') {
-        session.name = newDirName;
-        session.cwd = eventCwd;
-        log(`Updated Codex session name: ${session.name} (cwd: ${eventCwd})`);
-        broadcastSessions();
-        saveSessions();
-      } else if (!session.cwd || session.cwd === process.cwd()) {
-        // Just update cwd if it was defaulted
-        session.cwd = eventCwd;
-      }
-    }
-    return session;
-  };
+function findOrCreateSessionForEvent(
+  agentSessionId: string,
+  agent: AgentType,
+  eventCwd: string,
+  terminalInfo?: TerminalInfo
+): ManagedSession {
+  const session = cinSessionManager.findOrCreateSession(
+    agentSessionId,
+    agent,
+    eventCwd,
+    terminalInfo
+  );
 
-  // First try lookup by Codex thread ID
-  const existingId = codexToManagedMap.get(codexThreadId);
-  if (existingId) {
-    const existing = managedSessions.get(existingId);
-    if (existing) return maybeUpdateSession(existing);
+  // Log for debugging
+  if (session.type === 'external') {
+    const tmuxInfo = terminalInfo?.tmuxPane ? ` (tmux: ${terminalInfo.tmuxPane})` : '';
+    debug(`Session for ${agent} ${agentSessionId.slice(0, 8)}: ${session.name}${tmuxInfo}`);
   }
-
-  // Check if there's a session with matching thread ID
-  for (const session of managedSessions.values()) {
-    if (session.codexThreadId === codexThreadId) {
-      codexToManagedMap.set(codexThreadId, session.id);
-      return maybeUpdateSession(session);
-    }
-  }
-
-  // Check if there's an internal Codex session with matching cwd that hasn't been linked yet
-  // This happens when we create an internal session via UI and Codex starts inside it
-  for (const session of managedSessions.values()) {
-    if (
-      session.agent === 'codex' &&
-      session.type === 'internal' &&
-      !session.codexThreadId &&
-      session.cwd === eventCwd
-    ) {
-      // Link this thread ID to the existing internal session
-      session.codexThreadId = codexThreadId;
-      codexToManagedMap.set(codexThreadId, session.id);
-      log(`Linked Codex thread ${codexThreadId.slice(0, 8)} to internal session: ${session.name}`);
-      broadcastSessions();
-      saveSessions();
-      return maybeUpdateSession(session);
-    }
-  }
-
-  // Auto-create external session for this Codex thread
-  const id = randomUUID();
-  const dirName = eventCwd.split('/').pop() || 'Codex';
-  const sessionName = name || dirName;
-
-  const session: ManagedSession = {
-    id,
-    name: sessionName,
-    type: 'external',
-    agent: 'codex',
-    status: 'working',
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
-    cwd: eventCwd,
-    codexThreadId,
-    // No zonePosition - sessions are unplaced initially
-  };
-
-  managedSessions.set(id, session);
-  codexToManagedMap.set(codexThreadId, id);
-
-  log(`Auto-created Codex session: ${session.name} (Thread: ${codexThreadId.slice(0, 8)})`);
-  broadcastSessions();
-  saveSessions();
 
   return session;
+}
+
+// Legacy compatibility - Codex watcher still calls this
+function findOrCreateCodexSession(codexThreadId: string, eventCwd: string, _name?: string): ManagedSession {
+  return findOrCreateSessionForEvent(codexThreadId, 'codex', eventCwd);
 }
 
 /**
@@ -1874,17 +1512,17 @@ function reconcileCodexSessions(watcher: CodexSessionWatcher): void {
   const allSessionInfo = watcher.getAllSessions();
   let updated = false;
 
+  const sessions = cinSessionManager.listSessions();
   for (const info of allSessionInfo) {
     // Find the managed session for this thread
-    for (const session of managedSessions.values()) {
+    for (const session of sessions) {
       if (session.codexThreadId === info.threadId) {
         // Update if cwd differs and name is still default
         if (info.cwd && info.cwd !== session.cwd) {
           const newDirName = info.cwd.split('/').pop() || 'Codex';
           if (session.name === 'Codex Session' || session.name === 'Codex') {
             log(`Reconciling Codex session: ${session.name} -> ${newDirName}`);
-            session.name = newDirName;
-            session.cwd = info.cwd;
+            cinSessionManager.updateSession(session.id, { name: newDirName });
             updated = true;
           }
         }
@@ -1895,7 +1533,6 @@ function reconcileCodexSessions(watcher: CodexSessionWatcher): void {
 
   if (updated) {
     broadcastSessions();
-    saveSessions();
   }
 }
 
@@ -1960,54 +1597,45 @@ function addEvent(event: CINEvent): void {
   // Find or auto-create session for this event
   // Codex events have codexThreadId, Claude events use sessionId
   const codexThreadId = (event as any).codexThreadId;
-  let managedSession: ManagedSession;
+  const agentSessionId = codexThreadId || event.sessionId;
+  const agent: AgentType = codexThreadId ? 'codex' : 'claude';
 
-  if (codexThreadId) {
-    // Codex event - use codexThreadId for session lookup
-    managedSession = findOrCreateCodexSession(codexThreadId, event.cwd);
-  } else {
-    // Claude event - use claudeSessionId for session lookup
-    managedSession = findOrCreateExternalSession(event.sessionId, event.cwd, terminalInfo);
-  }
+  const managedSession = findOrCreateSessionForEvent(agentSessionId, agent, event.cwd, terminalInfo);
 
   // Normalize: always use managed session ID for event sessionId
   // This allows the frontend to use a single ID for zones and filtering
-  if (managedSession) {
-    event.sessionId = managedSession.id;
+  event.sessionId = managedSession.id;
+
+  // Update session status based on event type
+  const prevStatus = managedSession.status;
+
+  switch (event.type) {
+    case 'pre_tool_use':
+      cinSessionManager.updateSessionStatus(managedSession.id, 'working');
+      cinSessionManager.updateSessionTool(managedSession.id, (event as PreToolUseEvent).tool);
+      break;
+    case 'post_tool_use':
+      cinSessionManager.updateSessionTool(managedSession.id, undefined);
+      break;
+    case 'user_prompt_submit':
+      cinSessionManager.updateSessionStatus(managedSession.id, 'working');
+      cinSessionManager.updateSessionTool(managedSession.id, undefined);
+      break;
+    case 'stop':
+      // Claude finished responding - waiting for next user input (NEEDS ATTENTION!)
+      cinSessionManager.updateSessionStatus(managedSession.id, 'waiting');
+      cinSessionManager.updateSessionTool(managedSession.id, undefined);
+      break;
+    case 'session_end':
+      cinSessionManager.updateSessionStatus(managedSession.id, 'idle');
+      cinSessionManager.updateSessionTool(managedSession.id, undefined);
+      break;
   }
 
-  if (managedSession) {
-    const prevStatus = managedSession.status;
-    managedSession.lastActivity = Date.now();
-    managedSession.cwd = event.cwd;
-
-    switch (event.type) {
-      case 'pre_tool_use':
-        managedSession.status = 'working';
-        managedSession.currentTool = (event as PreToolUseEvent).tool;
-        break;
-      case 'post_tool_use':
-        managedSession.currentTool = undefined;
-        break;
-      case 'user_prompt_submit':
-        managedSession.status = 'working';
-        managedSession.currentTool = undefined;
-        break;
-      case 'stop':
-        // Claude finished responding - waiting for next user input (NEEDS ATTENTION!)
-        managedSession.status = 'waiting';
-        managedSession.currentTool = undefined;
-        break;
-      case 'session_end':
-        managedSession.status = 'idle';
-        managedSession.currentTool = undefined;
-        break;
-    }
-
-    if (managedSession.status !== prevStatus) {
-      broadcastSessions();
-      saveSessions();
-    }
+  // Get updated session to check if status changed
+  const updatedSession = cinSessionManager.getSession(managedSession.id);
+  if (updatedSession && updatedSession.status !== prevStatus) {
+    broadcastSessions();
   }
 
   // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
@@ -2035,18 +1663,11 @@ function loadEventsFromFile(): void {
       // Normalize: always use managed session ID for event sessionId
       // This allows the frontend to use a single ID for zones and filtering
       const codexThreadId = (event as any).codexThreadId;
-      let managedSession: ManagedSession | undefined;
+      const agentSessionId = codexThreadId || event.sessionId;
+      const agent: AgentType = codexThreadId ? 'codex' : 'claude';
 
-      if (codexThreadId) {
-        managedSession = findOrCreateCodexSession(codexThreadId, event.cwd);
-      } else {
-        // Claude event - look up by original sessionId (which is Claude's internal ID)
-        managedSession = findOrCreateExternalSession(event.sessionId, event.cwd);
-      }
-
-      if (managedSession) {
-        event.sessionId = managedSession.id;
-      }
+      const managedSession = findOrCreateSessionForEvent(agentSessionId, agent, event.cwd);
+      event.sessionId = managedSession.id;
 
       events.push(event);
     } catch {
@@ -2195,14 +1816,43 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
   if (req.method === 'POST' && req.url === '/event') {
     try {
       const body = await collectRequestBody(req);
-      // Use EventProcessor to transform raw hook events (hook_event_name) to normalized events (type)
-      const processed = bridgeEventProcessor.processLine(body);
-      if (processed) {
-        const event = processed.event as CINEvent;
+      const parsed = JSON.parse(body);
+
+      // Check if this is an already-normalized event (has 'type' field with valid value)
+      // or a raw hook event (has 'hook_event_name' field)
+      const validTypes = [
+        'pre_tool_use',
+        'post_tool_use',
+        'stop',
+        'subagent_stop',
+        'session_start',
+        'session_end',
+        'user_prompt_submit',
+        'notification',
+      ];
+
+      if (parsed.type && validTypes.includes(parsed.type)) {
+        // Already normalized event - use directly
+        const event: CINEvent = {
+          id: parsed.id || `http-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          type: parsed.type,
+          timestamp: parsed.timestamp || Date.now(),
+          sessionId: parsed.sessionId || '',
+          cwd: parsed.cwd || process.cwd(),
+          ...parsed,
+        };
         addEvent(event);
-        debug(`Received event via HTTP: ${event.type}`);
+        debug(`Received normalized event via HTTP: ${event.type}`);
       } else {
-        debug(`EventProcessor returned null for HTTP event: ${body.substring(0, 100)}`);
+        // Raw hook event - use EventProcessor
+        const processed = bridgeEventProcessor.processLine(body);
+        if (processed) {
+          const event = processed.event as CINEvent;
+          addEvent(event);
+          debug(`Received raw event via HTTP: ${event.type}`);
+        } else {
+          debug(`EventProcessor returned null for HTTP event: ${body.substring(0, 100)}`);
+        }
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -2333,7 +1983,8 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
     const now = Date.now();
     const toDelete: string[] = [];
 
-    for (const session of managedSessions.values()) {
+    const sessions = cinSessionManager.listSessions();
+    for (const session of sessions) {
       if (session.status === 'offline') {
         if (maxAgeMs > 0) {
           // Only delete if offline longer than maxAge
@@ -2507,47 +2158,22 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
         return;
       }
 
-      const tmuxSessionName = session.tmuxSession;
-
-      // Build command based on agent type
-      let agentCmd: string;
-      if (session.agent === 'codex') {
-        agentCmd = 'codex --full-auto';
-      } else {
-        agentCmd = 'claude --permission-mode=bypassPermissions --dangerously-skip-permissions';
-      }
-
-      // Use bridge methods for restart
+      // Use cinSessionManager.restart() which delegates to bridgeSessionManager
       (async () => {
         try {
-          // Kill existing tmux session if it exists (ignore errors)
-          await bridgeTmux.killSession(tmuxSessionName).catch(() => {});
-
-          // Create new session with agent command
-          await bridgeTmux.createSession(tmuxSessionName, { cwd, command: agentCmd });
-
-          session.status = 'idle';
-          session.lastActivity = Date.now();
-          session.claudeSessionId = undefined;
-          session.codexThreadId = undefined;
-          session.currentTool = undefined;
-
-          // Clear old linking
-          for (const [claudeId, managedId] of claudeToManagedMap) {
-            if (managedId === session.id) {
-              claudeToManagedMap.delete(claudeId);
-            }
+          const restarted = await cinSessionManager.restart(sessionId);
+          if (!restarted) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Failed to restart session' }));
+            return;
           }
 
-          log(`Restarted ${session.agent} session: ${session.name} (${session.id.slice(0, 8)})`);
+          log(`Restarted ${restarted.agent} session: ${restarted.name} (${restarted.id.slice(0, 8)})`);
           broadcastSessions();
-          saveSessions();
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, session }));
+          res.end(JSON.stringify({ ok: true, session: restarted }));
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          // Try to clean up on failure
-          bridgeTmux.killSession(tmuxSessionName).catch(() => {});
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: `Failed to restart: ${message}` }));
         }
@@ -2677,7 +2303,7 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
   const filesMatch = req.url?.match(/^\/sessions\/([a-f0-9-]+)\/files(\?.*)?$/);
   if (req.method === 'GET' && filesMatch) {
     const sessionId = filesMatch[1];
-    const session = managedSessions.get(sessionId);
+    const session = cinSessionManager.getSession(sessionId);
 
     if (!session) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -2766,7 +2392,7 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
   const fileMatch = req.url?.match(/^\/sessions\/([a-f0-9-]+)\/file(\?.*)?$/);
   if (req.method === 'GET' && fileMatch) {
     const sessionId = fileMatch[1];
-    const session = managedSessions.get(sessionId);
+    const session = cinSessionManager.getSession(sessionId);
 
     if (!session) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -2853,7 +2479,7 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
   const treeMatch = req.url?.match(/^\/sessions\/([a-f0-9-]+)\/files\/tree(\?.*)?$/);
   if (req.method === 'GET' && treeMatch) {
     const sessionId = treeMatch[1];
-    const session = managedSessions.get(sessionId);
+    const session = cinSessionManager.getSession(sessionId);
 
     if (!session) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -3002,19 +2628,24 @@ function main(): void {
 
   deepgramApiKey = loadDeepgramKey();
 
-  // IMPORTANT: Load sessions FIRST so mappings exist before events are processed
-  loadSessions();
-  loadEventsFromFile();
+  // Load tiles (independent of sessions)
   loadTiles();
 
   // Start bridge components (session manager, file watcher, event processor)
-  // This runs in parallel with the existing event processing for now
-  startBridge().catch((err) => {
-    console.error('Failed to start bridge:', err);
-  });
+  // bridgeSessionManager.start() loads sessions from disk
+  // cinSessionManager.start() loads CIN metadata
+  // Events will be loaded after sessions are ready
+  startBridge()
+    .then(() => {
+      // Load events after sessions are ready so we can link them
+      loadEventsFromFile();
+    })
+    .catch((err) => {
+      console.error('Failed to start bridge:', err);
+    });
 
   gitStatusManager.setUpdateHandler(({ sessionId, status }) => {
-    const session = managedSessions.get(sessionId);
+    const session = cinSessionManager.getSession(sessionId);
     if (session) {
       debug(`Git status updated for ${session.name}: ${status.branch}`);
       broadcastSessions();
@@ -3063,13 +2694,13 @@ function main(): void {
     ws.send(JSON.stringify({ type: 'sessions', data: sessions, payload: sessions }));
     ws.send(JSON.stringify({ type: 'text_tiles', payload: getTiles() }));
 
-    const activeClaudeSessionIds = new Set(
-      Array.from(managedSessions.values())
-        .map((s) => s.claudeSessionId)
-        .filter(Boolean)
+    // Filter history to only include events from active sessions
+    // Event sessionIds are now normalized to managed session IDs
+    const activeSessionIds = new Set(
+      cinSessionManager.listSessions().map((s) => s.id)
     );
     const filteredHistory = events
-      .filter((e) => activeClaudeSessionIds.has(e.sessionId))
+      .filter((e) => activeSessionIds.has(e.sessionId))
       .slice(-50);
     ws.send(JSON.stringify({ type: 'history', data: filteredHistory, payload: filteredHistory }));
 

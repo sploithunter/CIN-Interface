@@ -39,6 +39,18 @@ export interface ZonePosition {
     r: number;
 }
 /**
+ * CIN-specific session metadata stored separately from CAB's Session.
+ * This allows CIN to extend sessions without modifying the bridge's Session type.
+ */
+export interface CINSessionMetadata {
+    /** Hex grid position for 3D visualization */
+    zonePosition?: ZonePosition;
+    /** Claude's suggested next prompt */
+    suggestion?: string;
+    /** Ralph Wiggum mode - auto-accept suggestions */
+    autoAccept?: boolean;
+}
+/**
  * CIN-specific managed session - extends bridge's Session with visualization fields
  */
 export interface ManagedSession {

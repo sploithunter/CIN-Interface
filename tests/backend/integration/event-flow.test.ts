@@ -15,7 +15,8 @@ import { waitForOpen, waitForEventById, waitForMessageType, drainMessages, get, 
 
 const WS_URL = 'ws://localhost:4003';
 const SERVER_PORT = 4003;
-const EVENTS_FILE = join(homedir(), '.cin-interface/data/events.jsonl');
+// Events file is now at coding-agent-bridge location (where hooks write events)
+const EVENTS_FILE = join(homedir(), '.coding-agent-bridge/data/events.jsonl');
 
 // Test session prefix for cleanup
 const TEST_PREFIX = '__test_integration__';
