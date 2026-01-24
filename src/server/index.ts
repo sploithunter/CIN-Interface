@@ -30,6 +30,12 @@ import { hostname } from 'os';
 import { randomUUID, randomBytes } from 'crypto';
 import { createClient, LiveTranscriptionEvents, LiveClient } from '@deepgram/sdk';
 import { DEFAULTS } from '../shared/defaults.js';
+import {
+  loadFeedbackConfig,
+  DEFAULT_VALIDATION_CONFIG,
+  type FeedbackConfig,
+  type ValidationConfig,
+} from '../shared/feedbackConfig.js';
 import { GitStatusManager } from './GitStatusManager.js';
 import { ProjectsManager } from './ProjectsManager.js';
 import { CodexSessionWatcher, getCodexWatcher } from './CodexSessionWatcher.js';
@@ -164,6 +170,10 @@ const EXEC_OPTIONS = { env: { ...process.env, PATH: EXEC_PATH } };
 const DEEPGRAM_API_KEY_ENV = 'DEEPGRAM_API_KEY';
 const DEEPGRAM_MODEL = 'nova-2';
 const DEEPGRAM_LANGUAGE = 'en';
+
+/** Feedback system configuration (loaded from env) */
+let feedbackConfig: FeedbackConfig = loadFeedbackConfig();
+let validationConfig: ValidationConfig = { ...DEFAULT_VALIDATION_CONFIG };
 
 // =============================================================================
 // Security Helpers
@@ -2862,6 +2872,64 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
   // Feedback Endpoints
   // =============================================================================
 
+  // GET /feedback/config - Get feedback system configuration
+  if (req.method === 'GET' && req.url === '/feedback/config') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, config: feedbackConfig }));
+    return;
+  }
+
+  // PATCH /feedback/config - Update feedback system configuration
+  if (req.method === 'PATCH' && req.url === '/feedback/config') {
+    try {
+      const body = await collectRequestBody(req);
+      const changes = JSON.parse(body) as Partial<FeedbackConfig>;
+
+      // Merge changes into config
+      feedbackConfig = { ...feedbackConfig, ...changes };
+      log(`Updated feedback config: enabled=${feedbackConfig.enabled}`);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, config: feedbackConfig }));
+    } catch (e) {
+      console.error('Failed to update feedback config:', e);
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Invalid request body' }));
+    }
+    return;
+  }
+
+  // GET /feedback/validation/config - Get validation configuration
+  if (req.method === 'GET' && req.url === '/feedback/validation/config') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, config: validationConfig }));
+    return;
+  }
+
+  // PATCH /feedback/validation/config - Update validation configuration
+  if (req.method === 'PATCH' && req.url === '/feedback/validation/config') {
+    try {
+      const body = await collectRequestBody(req);
+      const changes = JSON.parse(body) as Partial<ValidationConfig>;
+
+      // Merge changes into config, handling nested 'skip' object
+      if (changes.skip) {
+        validationConfig.skip = { ...validationConfig.skip, ...changes.skip };
+        delete changes.skip;
+      }
+      validationConfig = { ...validationConfig, ...changes };
+      log(`Updated validation config: enabled=${validationConfig.enabled}`);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, config: validationConfig }));
+    } catch (e) {
+      console.error('Failed to update validation config:', e);
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Invalid request body' }));
+    }
+    return;
+  }
+
   // POST /feedback - Create new feedback
   if (req.method === 'POST' && req.url === '/feedback') {
     try {
@@ -2892,11 +2960,47 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
     // Parse query params for filtering
     const urlObj = new URL(req.url, `http://localhost:${PORT}`);
 
+    // Check for /feedback/config - handled earlier with exact match
+    if (urlObj.pathname === '/feedback/config') {
+      // Already handled above
+      return;
+    }
+
+    // Check for /feedback/validation/config - handled earlier with exact match
+    if (urlObj.pathname === '/feedback/validation/config') {
+      // Already handled above
+      return;
+    }
+
     // Check for /feedback/unprocessed
     if (urlObj.pathname === '/feedback/unprocessed') {
       const feedback = await feedbackRepo.getUnprocessed();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, feedback }));
+      return;
+    }
+
+    // Check for /feedback/:id/status (get feedback status for polling)
+    const feedbackStatusMatch = urlObj.pathname.match(/^\/feedback\/([a-f0-9-]+)\/status$/);
+    if (feedbackStatusMatch) {
+      const feedback = await feedbackRepo.get(feedbackStatusMatch[1]);
+      if (feedback) {
+        // Return only status-relevant fields
+        const status = {
+          id: feedback.id,
+          processed: feedback.processed,
+          githubIssueNumber: feedback.githubIssueNumber,
+          githubIssueUrl: feedback.githubIssueUrl,
+          fixerStatus: feedback.fixerStatus,
+          fixerMessage: feedback.fixerMessage,
+          screenshotUrl: feedback.screenshotUrl,
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, status }));
+      } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Feedback not found' }));
+      }
       return;
     }
 

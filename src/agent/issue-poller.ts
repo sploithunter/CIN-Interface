@@ -70,6 +70,28 @@ interface GitHubIssue {
   updated_at: string
 }
 
+/**
+ * Git checkpoint for safe rollback on validation failure
+ */
+interface GitCheckpoint {
+  issueKey: string
+  cwd: string
+  originalBranch: string
+  sha: string
+  timestamp: number
+  hasUncommittedChanges: boolean
+  feedbackId?: string  // Link to feedback for status updates
+}
+
+/**
+ * Validation result
+ */
+interface ValidationResult {
+  success: boolean
+  output: string
+  failedCommand?: string
+}
+
 interface CINSession {
   id: string
   name: string
@@ -90,6 +112,14 @@ interface IssuePollerConfig {
   autoFix: boolean
   maxConcurrentSessions: number
   debug: boolean
+  // Validation options
+  validationEnabled: boolean
+  validationCommands?: string[]  // Custom commands, or auto-detect from package.json
+  skipBuild: boolean
+  skipTest: boolean
+  skipLint: boolean
+  skipTypecheck: boolean
+  rollbackOnFailure: boolean
 }
 
 const DEFAULT_CONFIG: IssuePollerConfig = {
@@ -104,6 +134,14 @@ const DEFAULT_CONFIG: IssuePollerConfig = {
   autoFix: false,
   maxConcurrentSessions: 1,
   debug: false,
+  // Validation defaults
+  validationEnabled: true,
+  validationCommands: undefined,  // Auto-detect
+  skipBuild: false,
+  skipTest: false,
+  skipLint: false,
+  skipTypecheck: false,
+  rollbackOnFailure: true,
 }
 
 class IssuePoller {
@@ -114,9 +152,222 @@ class IssuePoller {
   private sessionToIssue: Map<string, string> = new Map() // sessionId -> issueKey
   private ws: WebSocket | null = null
   private sessionReadyResolvers: Map<string, () => void> = new Map() // sessionId -> resolver
+  private checkpoints: Map<string, GitCheckpoint> = new Map() // issueKey -> checkpoint
 
   constructor(config: Partial<IssuePollerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config }
+  }
+
+  // ===========================================================================
+  // Checkpoint / Validation / Rollback
+  // ===========================================================================
+
+  /**
+   * Create a git checkpoint before starting work
+   */
+  private async createCheckpoint(issueKey: string, cwd: string, feedbackId?: string): Promise<GitCheckpoint> {
+    this.log(`Creating checkpoint for ${issueKey}`)
+
+    try {
+      const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 5000,
+      }).trim()
+
+      const sha = execSync('git rev-parse HEAD', {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 5000,
+      }).trim()
+
+      const status = execSync('git status --porcelain', {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 5000,
+      }).trim()
+
+      const checkpoint: GitCheckpoint = {
+        issueKey,
+        cwd,
+        originalBranch: branch,
+        sha,
+        timestamp: Date.now(),
+        hasUncommittedChanges: status.length > 0,
+        feedbackId,
+      }
+
+      this.checkpoints.set(issueKey, checkpoint)
+      this.log(`Checkpoint created: branch=${branch}, sha=${sha.substring(0, 8)}`)
+
+      // Warn if there are uncommitted changes
+      if (checkpoint.hasUncommittedChanges) {
+        console.log(`   ⚠️  Warning: Uncommitted changes detected. Rollback may lose them.`)
+      }
+
+      return checkpoint
+    } catch (err) {
+      this.log('Failed to create checkpoint:', err)
+      throw new Error(`Failed to create git checkpoint: ${err}`)
+    }
+  }
+
+  /**
+   * Run validation commands to verify the fix works
+   */
+  private async runValidation(cwd: string): Promise<ValidationResult> {
+    if (!this.config.validationEnabled) {
+      return { success: true, output: 'Validation disabled' }
+    }
+
+    console.log(`   🔍 Running validation...`)
+    const outputs: string[] = []
+    let commands: string[] = []
+
+    // Use custom commands or auto-detect from package.json
+    if (this.config.validationCommands && this.config.validationCommands.length > 0) {
+      commands = this.config.validationCommands
+    } else {
+      // Auto-detect from package.json
+      try {
+        const pkgPath = join(cwd, 'package.json')
+        if (existsSync(pkgPath)) {
+          const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+          const scripts = pkg.scripts || {}
+
+          if (scripts.build && !this.config.skipBuild) {
+            commands.push('npm run build')
+          }
+          if (scripts.typecheck && !this.config.skipTypecheck) {
+            commands.push('npm run typecheck')
+          }
+          if (scripts.lint && !this.config.skipLint) {
+            commands.push('npm run lint')
+          }
+          if (scripts.test && !this.config.skipTest) {
+            commands.push('npm test')
+          }
+        }
+      } catch (err) {
+        this.log('Failed to read package.json:', err)
+      }
+    }
+
+    if (commands.length === 0) {
+      return { success: true, output: 'No validation commands found' }
+    }
+
+    console.log(`   📋 Validation commands: ${commands.join(', ')}`)
+
+    for (const cmd of commands) {
+      try {
+        console.log(`   ⏳ Running: ${cmd}`)
+        const output = execSync(cmd, {
+          cwd,
+          encoding: 'utf-8',
+          timeout: 300000, // 5 minutes per command
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        outputs.push(`✓ ${cmd}:\n${output.slice(-500)}`) // Last 500 chars
+        console.log(`   ✓ ${cmd} passed`)
+      } catch (err) {
+        const error = err as { stderr?: string; stdout?: string; message?: string }
+        const errorOutput = error.stderr || error.stdout || error.message || 'Unknown error'
+        outputs.push(`✗ ${cmd} FAILED:\n${errorOutput.slice(-1000)}`)
+        console.log(`   ✗ ${cmd} FAILED`)
+        return {
+          success: false,
+          output: outputs.join('\n\n'),
+          failedCommand: cmd,
+        }
+      }
+    }
+
+    console.log(`   ✅ All validation checks passed`)
+    return { success: true, output: outputs.join('\n\n') }
+  }
+
+  /**
+   * Rollback to checkpoint state
+   */
+  private async rollback(checkpoint: GitCheckpoint): Promise<void> {
+    const { cwd, originalBranch, sha, issueKey } = checkpoint
+    console.log(`   ⏪ Rolling back ${issueKey}...`)
+
+    try {
+      // Switch back to original branch
+      execSync(`git checkout ${originalBranch}`, {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 30000,
+        stdio: 'pipe',
+      })
+      console.log(`   ✓ Switched to branch: ${originalBranch}`)
+
+      // Reset to original SHA
+      execSync(`git reset --hard ${sha}`, {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 30000,
+        stdio: 'pipe',
+      })
+      console.log(`   ✓ Reset to commit: ${sha.substring(0, 8)}`)
+
+      // Clean untracked files (new files created by the agent)
+      execSync('git clean -fd', {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 30000,
+        stdio: 'pipe',
+      })
+      console.log(`   ✓ Cleaned untracked files`)
+
+      // Delete fix branch if it was created
+      const issueNumber = issueKey.split('#')[1]
+      const fixBranches = [`fix/issue-${issueNumber}`, `feature/issue-${issueNumber}`]
+      for (const branch of fixBranches) {
+        try {
+          execSync(`git branch -D ${branch}`, {
+            cwd,
+            encoding: 'utf-8',
+            timeout: 5000,
+            stdio: 'pipe',
+          })
+          this.log(`Deleted branch: ${branch}`)
+        } catch {
+          // Branch doesn't exist, ignore
+        }
+      }
+
+      console.log(`   ✅ Rollback complete`)
+    } catch (err) {
+      console.error(`   ❌ Rollback failed:`, err)
+      throw new Error(`Rollback failed: ${err}`)
+    }
+  }
+
+  /**
+   * Update feedback fixer status via API
+   */
+  private async updateFeedbackStatus(
+    feedbackId: string,
+    status: 'pending' | 'in_progress' | 'validating' | 'complete' | 'failed' | 'rolled_back',
+    message?: string,
+    validationOutput?: string
+  ): Promise<void> {
+    try {
+      await this.fetchJson(`${this.config.apiUrl}/feedback/${feedbackId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          fixerStatus: status,
+          fixerMessage: message,
+          validationOutput,
+        }),
+      })
+      this.log(`Updated feedback ${feedbackId} status: ${status}`)
+    } catch (err) {
+      this.log('Failed to update feedback status:', err)
+    }
   }
 
   /**
@@ -209,7 +460,7 @@ class IssuePoller {
   }
 
   /**
-   * Handle session completion - cleanup and close issue
+   * Handle session completion - validate, rollback if needed, cleanup
    */
   private async handleSessionComplete(sessionId: string): Promise<void> {
     const issueKey = this.sessionToIssue.get(sessionId)
@@ -220,11 +471,90 @@ class IssuePoller {
 
     console.log(`\n✅ Session for ${issueKey} completed`)
 
-    // Close the GitHub issue if in auto-fix mode
-    if (this.config.autoFix) {
+    // Get checkpoint for this issue
+    const checkpoint = this.checkpoints.get(issueKey)
+
+    // Run validation if in auto-fix mode
+    if (this.config.autoFix && checkpoint) {
+      // Update feedback status to validating
+      if (checkpoint.feedbackId) {
+        await this.updateFeedbackStatus(checkpoint.feedbackId, 'validating', 'Running validation checks')
+      }
+
+      const validation = await this.runValidation(checkpoint.cwd)
+
+      if (!validation.success) {
+        console.log(`   ❌ Validation failed: ${validation.failedCommand}`)
+
+        // Rollback if enabled
+        if (this.config.rollbackOnFailure) {
+          try {
+            await this.rollback(checkpoint)
+            if (checkpoint.feedbackId) {
+              await this.updateFeedbackStatus(
+                checkpoint.feedbackId,
+                'rolled_back',
+                `Validation failed: ${validation.failedCommand}`,
+                validation.output
+              )
+            }
+
+            // Add comment to issue explaining the failure
+            try {
+              const [repo, issueNum] = issueKey.split('#')
+              const comment = `⚠️ **Automated fix attempt failed validation**\n\n` +
+                `The agent attempted to fix this issue but the changes failed validation:\n` +
+                `- Failed command: \`${validation.failedCommand}\`\n\n` +
+                `The changes have been rolled back. Manual intervention may be required.`
+              execSync(`gh issue comment ${issueNum} --repo ${repo} --body "${comment.replace(/"/g, '\\"')}"`, {
+                encoding: 'utf-8',
+                stdio: 'pipe',
+              })
+            } catch (err) {
+              this.log('Failed to comment on issue:', err)
+            }
+          } catch (rollbackErr) {
+            console.error(`   ❌ Rollback also failed:`, rollbackErr)
+            if (checkpoint.feedbackId) {
+              await this.updateFeedbackStatus(
+                checkpoint.feedbackId,
+                'failed',
+                `Validation failed and rollback failed: ${rollbackErr}`,
+                validation.output
+              )
+            }
+          }
+        } else {
+          // No rollback, just mark as failed
+          if (checkpoint.feedbackId) {
+            await this.updateFeedbackStatus(
+              checkpoint.feedbackId,
+              'failed',
+              `Validation failed: ${validation.failedCommand}`,
+              validation.output
+            )
+          }
+        }
+
+        // Clean up tracking but don't close issue
+        this.cleanupTracking(sessionId, issueKey)
+        return
+      }
+
+      // Validation passed - update feedback and close issue
+      if (checkpoint.feedbackId) {
+        await this.updateFeedbackStatus(
+          checkpoint.feedbackId,
+          'complete',
+          `Fix validated and applied successfully`,
+          validation.output
+        )
+      }
+
+      // Close the GitHub issue
       try {
         const [repo, issueNum] = issueKey.split('#')
-        execSync(`gh issue close ${issueNum} --repo ${repo} --comment "Fix implemented by automation agent. Branch: fix/issue-${issueNum}"`, {
+        execSync(`gh issue close ${issueNum} --repo ${repo} --comment "Fix implemented and validated by automation agent. Branch: fix/issue-${issueNum}"`, {
           encoding: 'utf-8',
           stdio: 'pipe',
         })
@@ -234,6 +564,14 @@ class IssuePoller {
       }
     }
 
+    // Clean up
+    this.cleanupTracking(sessionId, issueKey)
+  }
+
+  /**
+   * Clean up tracking maps and session
+   */
+  private async cleanupTracking(sessionId: string, issueKey: string): Promise<void> {
     // Clean up the session
     try {
       await this.deleteSession(sessionId)
@@ -245,6 +583,7 @@ class IssuePoller {
     // Remove from tracking maps
     this.activeSessions.delete(issueKey)
     this.sessionToIssue.delete(sessionId)
+    this.checkpoints.delete(issueKey)
   }
 
   /**
@@ -521,7 +860,7 @@ Do not make any changes - just analyze and report your findings.`
   /**
    * Process a single issue
    */
-  async processIssue(issue: GitHubIssue, repo: string): Promise<void> {
+  async processIssue(issue: GitHubIssue, repo: string, feedbackId?: string): Promise<void> {
     const issueKey = `${repo}#${issue.number}`
 
     console.log(`\n📋 Processing ${issueKey}: ${issue.title}`)
@@ -532,9 +871,18 @@ Do not make any changes - just analyze and report your findings.`
     const cwd = this.getRepoCwd(repo)
 
     try {
-      console.log(`   🚀 Spawning Claude Code session...`)
       console.log(`   📁 Working directory: ${cwd}`)
 
+      // Create checkpoint before starting work (for auto-fix mode)
+      if (this.config.autoFix) {
+        console.log(`   💾 Creating checkpoint...`)
+        await this.createCheckpoint(issueKey, cwd, feedbackId)
+        if (feedbackId) {
+          await this.updateFeedbackStatus(feedbackId, 'in_progress', `Working on issue #${issue.number}`)
+        }
+      }
+
+      console.log(`   🚀 Spawning Claude Code session...`)
       const session = await this.createSession(sessionName, cwd)
       this.activeSessions.set(issueKey, session.id)
       this.sessionToIssue.set(session.id, issueKey) // Reverse mapping for cleanup
@@ -556,10 +904,16 @@ Do not make any changes - just analyze and report your findings.`
 
       if (!result) {
         console.error(`   ❌ Failed to send prompt`)
+        if (feedbackId) {
+          await this.updateFeedbackStatus(feedbackId, 'failed', 'Failed to send prompt to agent')
+        }
         return
       }
 
       console.log(`   ✅ Prompt sent - agent is ${this.config.autoFix ? 'working on' : 'analyzing'} the issue`)
+      if (this.config.autoFix && this.config.validationEnabled) {
+        console.log(`   ℹ️  Validation will run on completion, rollback on failure: ${this.config.rollbackOnFailure ? 'enabled' : 'disabled'}`)
+      }
       console.log(`   ℹ️  Session will auto-cleanup when complete`)
 
       // Mark as processed
@@ -568,6 +922,10 @@ Do not make any changes - just analyze and report your findings.`
     } catch (error) {
       console.error(`   ❌ Error processing issue:`, error)
       this.activeSessions.delete(issueKey)
+      this.checkpoints.delete(issueKey)
+      if (feedbackId) {
+        await this.updateFeedbackStatus(feedbackId, 'failed', `Error processing issue: ${error}`)
+      }
     }
   }
 
@@ -628,6 +986,20 @@ Do not make any changes - just analyze and report your findings.`
     console.log(`   CIN-Interface API: ${this.config.apiUrl}`)
     console.log(`   Poll interval: ${this.config.pollIntervalMs / 1000}s`)
     console.log(`   Auto-fix: ${this.config.autoFix ? 'enabled' : 'disabled (analyze only)'}`)
+    if (this.config.autoFix) {
+      console.log(`   Validation: ${this.config.validationEnabled ? 'enabled' : 'disabled'}`)
+      if (this.config.validationEnabled) {
+        console.log(`   Rollback on failure: ${this.config.rollbackOnFailure ? 'enabled' : 'disabled'}`)
+        const skipped: string[] = []
+        if (this.config.skipBuild) skipped.push('build')
+        if (this.config.skipTest) skipped.push('test')
+        if (this.config.skipLint) skipped.push('lint')
+        if (this.config.skipTypecheck) skipped.push('typecheck')
+        if (skipped.length > 0) {
+          console.log(`   Skipped checks: ${skipped.join(', ')}`)
+        }
+      }
+    }
     if (this.config.dangerouslyAllowAllUsers) {
       console.log(`   ⚠️  DANGER: All users allowed (--dangerously-allow-all-users)`)
     } else if (this.config.allowedUsers && this.config.allowedUsers.length > 0) {
@@ -713,11 +1085,34 @@ async function main() {
       case '--debug':
         config.debug = true
         break
+      // Validation options
+      case '--no-validation':
+        config.validationEnabled = false
+        break
+      case '--validation-commands':
+        config.validationCommands = args[++i].split(',')
+        break
+      case '--skip-build':
+        config.skipBuild = true
+        break
+      case '--skip-test':
+        config.skipTest = true
+        break
+      case '--skip-lint':
+        config.skipLint = true
+        break
+      case '--skip-typecheck':
+        config.skipTypecheck = true
+        break
+      case '--no-rollback':
+        config.rollbackOnFailure = false
+        break
       case '--help':
         console.log(`
 Issue Poller - Poll GitHub for New Issues
 
 Polls GitHub for new issues and spawns Claude Code sessions to work on them.
+When auto-fix is enabled, validates changes and rolls back on failure.
 
 Usage: npm run agent:poller [options]
 
@@ -735,6 +1130,15 @@ Options:
   --max-concurrent <n>    Max concurrent sessions (default: 1)
   --debug                 Enable debug logging
   --help                  Show this help
+
+Validation Options (for --auto-fix mode):
+  --no-validation         Disable validation after fix (default: enabled)
+  --validation-commands   Custom validation commands (comma-separated)
+  --skip-build            Skip 'npm run build' validation
+  --skip-test             Skip 'npm test' validation
+  --skip-lint             Skip 'npm run lint' validation
+  --skip-typecheck        Skip 'npm run typecheck' validation
+  --no-rollback           Don't rollback on validation failure (default: rollback enabled)
 
 Security (IMPORTANT):
   By default, the agent will NOT process any issues unless you specify trusted users.
@@ -757,6 +1161,9 @@ Examples:
 
   # Watch specific repos with auto-fix for trusted users
   npm run agent:poller -- --repos owner/repo --auto-fix --allowed-users owner
+
+  # Auto-fix with custom validation and no rollback
+  npm run agent:poller -- --repos owner/repo --auto-fix --validation-commands "npm run build,npm test" --no-rollback --allowed-users owner
 
   # DANGEROUS: Allow all users (only for fully trusted private repos)
   npm run agent:poller -- --repos owner/private-repo --dangerously-allow-all-users

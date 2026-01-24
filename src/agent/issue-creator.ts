@@ -6,9 +6,11 @@
  *
  * Flow:
  * 1. Poll GET /feedback/unprocessed
- * 2. For each feedback, create a session via CIN-Interface API
- * 3. Send a prompt to create a GitHub issue
- * 4. Mark feedback as processed with the issue URL
+ * 2. Check for duplicate issues (deduplication)
+ * 3. Upload screenshot to GitHub if present
+ * 4. Create a session via CIN-Interface API
+ * 5. Send a prompt to create a GitHub issue
+ * 6. Mark feedback as processed with the issue URL and fixerStatus
  *
  * Usage:
  *   npm run agent:issues -- --cwd /path/to/project
@@ -16,7 +18,9 @@
 
 import { homedir } from 'os'
 import { join } from 'path'
+import { readFileSync, existsSync } from 'fs'
 import { WebSocket } from 'ws'
+import { execSync } from 'child_process'
 
 interface Feedback {
   id: string
@@ -32,9 +36,19 @@ interface Feedback {
   viewportHeight: number
   userAgent: string
   screenshotPath?: string
+  screenshotUrl?: string
   processed: boolean
   githubIssueNumber?: number
   githubIssueUrl?: string
+  fixerStatus?: string
+}
+
+interface GitHubIssue {
+  number: number
+  title: string
+  body: string
+  html_url: string
+  labels: { name: string }[]
 }
 
 interface CINSession {
@@ -50,6 +64,10 @@ interface IssueCreatorConfig {
   pollIntervalMs: number
   maxConcurrentSessions: number
   debug: boolean
+  githubRepo?: string      // GitHub repo for issues (e.g., "owner/repo")
+  uploadScreenshots: boolean // Upload screenshots to GitHub repo
+  deduplication: boolean   // Check for duplicate issues before creating
+  similarityThreshold: number // 0-1, how similar titles must be to count as duplicate
 }
 
 const DEFAULT_CONFIG: IssueCreatorConfig = {
@@ -58,6 +76,10 @@ const DEFAULT_CONFIG: IssueCreatorConfig = {
   pollIntervalMs: 10000, // 10 seconds
   maxConcurrentSessions: 1, // Process one at a time to avoid conflicts
   debug: false,
+  githubRepo: undefined, // Auto-detect from git remote
+  uploadScreenshots: true,
+  deduplication: true,
+  similarityThreshold: 0.7,
 }
 
 class IssueCreatorAgent {
@@ -72,6 +94,188 @@ class IssueCreatorAgent {
   constructor(config: Partial<IssueCreatorConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config }
   }
+
+  // ===========================================================================
+  // GitHub Helpers (deduplication, screenshot upload)
+  // ===========================================================================
+
+  /**
+   * Get GitHub repo from config or detect from git remote
+   */
+  private getGitHubRepo(): string | null {
+    if (this.config.githubRepo) {
+      return this.config.githubRepo
+    }
+
+    try {
+      const remote = execSync('git remote get-url origin', {
+        cwd: this.config.projectCwd,
+        encoding: 'utf-8',
+        timeout: 5000,
+      }).trim()
+
+      // Parse GitHub repo from remote URL
+      // Supports: https://github.com/owner/repo.git, git@github.com:owner/repo.git
+      const httpsMatch = remote.match(/github\.com\/([^/]+)\/([^/.]+)/)
+      const sshMatch = remote.match(/github\.com:([^/]+)\/([^/.]+)/)
+      const match = httpsMatch || sshMatch
+
+      if (match) {
+        return `${match[1]}/${match[2]}`
+      }
+    } catch {
+      this.log('Failed to detect GitHub repo from git remote')
+    }
+
+    return null
+  }
+
+  /**
+   * Calculate similarity between two strings (Jaccard similarity on words)
+   */
+  private calculateSimilarity(a: string, b: string): number {
+    const wordsA = new Set(a.toLowerCase().split(/\s+/).filter(w => w.length > 2))
+    const wordsB = new Set(b.toLowerCase().split(/\s+/).filter(w => w.length > 2))
+
+    if (wordsA.size === 0 || wordsB.size === 0) return 0
+
+    const intersection = new Set([...wordsA].filter(w => wordsB.has(w)))
+    const union = new Set([...wordsA, ...wordsB])
+
+    return intersection.size / union.size
+  }
+
+  /**
+   * Find existing issue that matches the feedback (deduplication)
+   * Returns the issue number if found, null otherwise
+   */
+  private async findExistingIssue(feedback: Feedback): Promise<GitHubIssue | null> {
+    if (!this.config.deduplication) {
+      return null
+    }
+
+    const repo = this.getGitHubRepo()
+    if (!repo) {
+      this.log('Cannot check for duplicates: no GitHub repo configured')
+      return null
+    }
+
+    try {
+      // Search for open issues with feedback label
+      const result = execSync(
+        `gh issue list --repo ${repo} --label feedback --state open --json number,title,body,html_url,labels --limit 50`,
+        {
+          encoding: 'utf-8',
+          timeout: 15000,
+        }
+      )
+
+      const issues: GitHubIssue[] = JSON.parse(result)
+
+      // First check if any issue references this feedback ID
+      for (const issue of issues) {
+        if (issue.body && issue.body.includes(feedback.id)) {
+          this.log(`Found existing issue #${issue.number} referencing feedback ${feedback.id}`)
+          return issue
+        }
+      }
+
+      // Then check for similar titles/descriptions
+      for (const issue of issues) {
+        const similarity = this.calculateSimilarity(issue.title, feedback.description)
+        if (similarity >= this.config.similarityThreshold) {
+          this.log(`Found similar issue #${issue.number} (similarity: ${similarity.toFixed(2)})`)
+          return issue
+        }
+      }
+
+      return null
+    } catch (err) {
+      this.log('Failed to search for existing issues:', err)
+      return null
+    }
+  }
+
+  /**
+   * Upload screenshot to GitHub repo and return raw URL
+   */
+  private async uploadScreenshot(feedbackId: string, screenshotPath: string): Promise<string | null> {
+    if (!this.config.uploadScreenshots) {
+      return null
+    }
+
+    const repo = this.getGitHubRepo()
+    if (!repo) {
+      this.log('Cannot upload screenshot: no GitHub repo configured')
+      return null
+    }
+
+    if (!existsSync(screenshotPath)) {
+      this.log('Screenshot file not found:', screenshotPath)
+      return null
+    }
+
+    try {
+      // Read the screenshot file
+      const screenshotData = readFileSync(screenshotPath)
+      const base64Content = screenshotData.toString('base64')
+
+      // Generate unique filename
+      const timestamp = Date.now()
+      const filename = `feedback-${feedbackId.substring(0, 8)}-${timestamp}.png`
+      const path = `.github/feedback-screenshots/${filename}`
+
+      console.log(`   📸 Uploading screenshot to GitHub...`)
+
+      // Create or update file via gh API
+      execSync(
+        `gh api repos/${repo}/contents/${path} \
+          -X PUT \
+          -f message="Add feedback screenshot ${feedbackId}" \
+          -f content="${base64Content}"`,
+        {
+          encoding: 'utf-8',
+          timeout: 30000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }
+      )
+
+      const rawUrl = `https://raw.githubusercontent.com/${repo}/main/${path}`
+      console.log(`   ✓ Screenshot uploaded: ${filename}`)
+      return rawUrl
+
+    } catch (err) {
+      this.log('Failed to upload screenshot:', err)
+      // Don't fail the whole process if screenshot upload fails
+      return null
+    }
+  }
+
+  /**
+   * Update feedback with fixer status
+   */
+  private async updateFixerStatus(
+    feedbackId: string,
+    status: 'pending' | 'in_progress' | 'complete' | 'failed',
+    message?: string
+  ): Promise<void> {
+    try {
+      await this.fetchJson(`${this.config.apiUrl}/feedback/${feedbackId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          fixerStatus: status,
+          fixerMessage: message,
+        }),
+      })
+      this.log(`Updated fixer status for ${feedbackId}: ${status}`)
+    } catch (err) {
+      this.log('Failed to update fixer status:', err)
+    }
+  }
+
+  // ===========================================================================
+  // WebSocket & Session Management
+  // ===========================================================================
 
   /**
    * Connect to CIN-Interface WebSocket for real-time events
@@ -224,14 +428,20 @@ class IssueCreatorAgent {
       }
     }
 
-    // Mark feedback as processed
+    // Mark feedback as processed and update fixer status
     if (issueUrl && issueNumber) {
       try {
         await this.markProcessed(feedbackId, issueNumber, issueUrl)
+        await this.updateFixerStatus(feedbackId, 'pending', `Issue #${issueNumber} created, awaiting fix`)
         console.log(`   ✓ Feedback ${feedbackId} marked as processed`)
       } catch (err) {
         console.error(`   ✗ Failed to mark feedback as processed:`, err)
+        await this.updateFixerStatus(feedbackId, 'failed', `Failed to mark as processed: ${err}`)
       }
+    } else {
+      // Issue creation failed
+      await this.updateFixerStatus(feedbackId, 'failed', 'No issue URL found in agent output')
+      console.log(`   ⚠️ No issue URL found - feedback not marked as processed`)
     }
 
     // Clean up the session
@@ -338,7 +548,7 @@ class IssueCreatorAgent {
   /**
    * Build the prompt for creating a GitHub issue from feedback
    */
-  buildIssuePrompt(feedback: Feedback): string {
+  buildIssuePrompt(feedback: Feedback, screenshotUrl?: string | null): string {
     const typeLabels: Record<Feedback['type'], string> = {
       bug: 'bug',
       improve: 'enhancement',
@@ -351,8 +561,11 @@ class IssueCreatorAgent {
       works: '❤️',
     }
 
-    const label = typeLabels[feedback.type]
+    const typeLabel = typeLabels[feedback.type]
     const emoji = typeEmojis[feedback.type]
+
+    // Build list of labels: type-specific + common labels
+    const labels = [typeLabel, 'feedback', 'agent-created']
 
     let context = ''
     if (feedback.sessionName) {
@@ -374,15 +587,23 @@ class IssueCreatorAgent {
       context += `\n- Browser: ${feedback.userAgent}`
     }
 
-    const screenshotNote = feedback.screenshotPath
-      ? `\n\nA screenshot was captured and saved at: ${feedback.screenshotPath}`
-      : ''
+    // Build screenshot section
+    let screenshotSection = ''
+    if (screenshotUrl) {
+      // Include URL for issue body and note about embedding
+      screenshotSection = `\n\n**Screenshot:** [View Screenshot](${screenshotUrl})
+*(Include the screenshot in the issue body using: ![Screenshot](${screenshotUrl}))*`
+    } else if (feedback.screenshotPath) {
+      screenshotSection = `\n\n*A screenshot was captured locally at: ${feedback.screenshotPath}*`
+    }
+
+    const labelsStr = labels.join(',')
 
     return `Create a GitHub issue for the following user feedback. Use the gh CLI to create the issue.
 
 **Feedback Type:** ${emoji} ${feedback.type}
 **Description:** ${feedback.description}
-**Context:**${context}${screenshotNote}
+**Context:**${context}${screenshotSection}
 
 **Submitted:** ${new Date(feedback.timestamp).toISOString()}
 **Feedback ID:** ${feedback.id}
@@ -393,8 +614,10 @@ Instructions:
    - A summary of the reported ${feedback.type}
    - The technical context (session, viewport, browser)
    - Any console errors if present
+   - If a screenshot URL is provided, embed it in the body with: ![Screenshot](url)
    - Reference to the feedback ID for tracking
-3. Add the label "${label}" to the issue
+3. Add these labels to the issue: ${labelsStr}
+   Use: gh issue create --label "${labelsStr}" ...
 4. After creating the issue, output ONLY the issue URL on a single line starting with "ISSUE_URL:"
 
 Example output format:
@@ -410,10 +633,36 @@ Do not ask for confirmation, just create the issue.`
     console.log(`\n📋 Processing feedback ${feedback.id} (${feedback.type})`)
     console.log(`   "${feedback.description.substring(0, 60)}..."`)
 
-    // Create a session for this feedback
-    const sessionName = `issue-${feedback.id.substring(0, 8)}`
-
     try {
+      // Step 1: Check for duplicate issues
+      const existingIssue = await this.findExistingIssue(feedback)
+      if (existingIssue) {
+        console.log(`   🔄 Found existing issue #${existingIssue.number} - linking feedback`)
+        await this.markProcessed(feedback.id, existingIssue.number, existingIssue.html_url)
+        await this.updateFixerStatus(feedback.id, 'complete', `Linked to existing issue #${existingIssue.number}`)
+        console.log(`   ✓ Feedback linked to existing issue: ${existingIssue.html_url}`)
+        return
+      }
+
+      // Step 2: Upload screenshot to GitHub if available
+      let screenshotUrl: string | null = null
+      if (feedback.screenshotPath) {
+        screenshotUrl = await this.uploadScreenshot(feedback.id, feedback.screenshotPath)
+        if (screenshotUrl) {
+          // Store the screenshot URL in the feedback
+          await this.fetchJson(`${this.config.apiUrl}/feedback/${feedback.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ screenshotUrl }),
+          })
+        }
+      }
+
+      // Step 3: Create a session for this feedback
+      const sessionName = `issue-${feedback.id.substring(0, 8)}`
+
+      // Update fixer status to in_progress
+      await this.updateFixerStatus(feedback.id, 'in_progress', 'Creating GitHub issue')
+
       // Create CIN-Interface session
       console.log(`   🚀 Spawning Claude Code session...`)
       const session = await this.createSession(sessionName)
@@ -427,9 +676,9 @@ Do not ask for confirmation, just create the issue.`
       // Wait for session to be ready
       await this.waitForSessionReady(session.id)
 
-      // Send the prompt to create the issue
+      // Step 4: Send the prompt to create the issue
       console.log(`   📝 Sending issue creation prompt...`)
-      const prompt = this.buildIssuePrompt(feedback)
+      const prompt = this.buildIssuePrompt(feedback, screenshotUrl)
       await this.sendPrompt(session.id, prompt)
 
       console.log(`   ✅ Prompt sent - agent is working on creating the issue`)
@@ -437,6 +686,7 @@ Do not ask for confirmation, just create the issue.`
 
     } catch (error) {
       console.error(`   ❌ Error processing feedback:`, error)
+      await this.updateFixerStatus(feedback.id, 'failed', String(error))
       throw error
     }
   }
@@ -515,10 +765,14 @@ Do not ask for confirmation, just create the issue.`
       return
     }
 
+    const repo = this.getGitHubRepo()
     console.log('🤖 Issue Creator Agent started')
     console.log(`   CIN-Interface API: ${this.config.apiUrl}`)
     console.log(`   Project: ${this.config.projectCwd}`)
+    console.log(`   GitHub repo: ${repo || '(not detected)'}`)
     console.log(`   Poll interval: ${this.config.pollIntervalMs}ms`)
+    console.log(`   Screenshot upload: ${this.config.uploadScreenshots ? 'enabled' : 'disabled'}`)
+    console.log(`   Deduplication: ${this.config.deduplication ? `enabled (threshold: ${this.config.similarityThreshold})` : 'disabled'}`)
     console.log('')
 
     this.running = true
@@ -578,6 +832,18 @@ async function main() {
       case '--debug':
         config.debug = true
         break
+      case '--repo':
+        config.githubRepo = args[++i]
+        break
+      case '--no-screenshots':
+        config.uploadScreenshots = false
+        break
+      case '--no-dedup':
+        config.deduplication = false
+        break
+      case '--similarity':
+        config.similarityThreshold = parseFloat(args[++i])
+        break
       case '--help':
         console.log(`
 Issue Creator Agent - Creates GitHub issues from feedback via Claude Code
@@ -587,12 +853,17 @@ Usage: npm run agent:issues [options]
 Options:
   --api-url <url>         CIN-Interface API URL (default: http://localhost:4003)
   --cwd <path>            Project working directory (default: current dir)
+  --repo <owner/repo>     GitHub repo for issues (default: auto-detect from git remote)
   --poll-interval <ms>    Poll interval in ms (default: 10000)
+  --no-screenshots        Disable screenshot upload to GitHub
+  --no-dedup              Disable duplicate issue detection
+  --similarity <0-1>      Similarity threshold for deduplication (default: 0.7)
   --debug                 Enable debug logging
   --help                  Show this help
 
 Example:
   npm run agent:issues -- --cwd /path/to/my-project
+  npm run agent:issues -- --repo owner/repo --cwd /path/to/project
 `)
         process.exit(0)
     }

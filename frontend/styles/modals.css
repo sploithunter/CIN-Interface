@@ -2119,3 +2119,254 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* =============================================================================
+   Feedback Status Tab
+   ============================================================================= */
+
+/* Tab navigation */
+.feedback-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.feedback-tab {
+  flex: 1;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.feedback-tab:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.feedback-tab.active {
+  background: rgba(167, 139, 250, 0.2);
+  color: #a78bfa;
+}
+
+/* Status count badge */
+.feedback-status-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: rgba(167, 139, 250, 0.3);
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #a78bfa;
+}
+
+.feedback-status-count.hidden {
+  display: none;
+}
+
+/* Tab content */
+.feedback-tab-content {
+  min-height: 200px;
+}
+
+.feedback-tab-content.hidden {
+  display: none;
+}
+
+/* Status list */
+.feedback-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 350px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.feedback-status-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.feedback-status-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.feedback-status-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.feedback-status-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Empty state */
+.feedback-status-empty {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  padding: 40px 20px;
+}
+
+/* Status item */
+.feedback-status-item {
+  position: relative;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 14px 16px;
+  transition: all 0.15s;
+}
+
+.feedback-status-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Item header */
+.feedback-status-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+/* Status badge */
+.feedback-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.feedback-status-badge.status-pending {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.feedback-status-badge.status-issue-created {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.feedback-status-badge.status-in-progress {
+  background: rgba(167, 139, 250, 0.15);
+  color: #a78bfa;
+}
+
+.feedback-status-badge.status-complete {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.feedback-status-badge.status-failed {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+}
+
+/* Time ago */
+.feedback-status-time {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Item body */
+.feedback-status-item-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.feedback-status-type-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.feedback-status-description {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Fixer message */
+.feedback-status-message {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.4;
+}
+
+/* GitHub issue link */
+.feedback-status-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #3b82f6;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.feedback-status-link:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+/* Remove button */
+.feedback-status-remove {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.feedback-status-item:hover .feedback-status-remove {
+  opacity: 1;
+}
+
+.feedback-status-remove:hover {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+
+/* Status tab close button */
+#feedback-status-close {
+  width: 100%;
+  margin-top: 16px;
+}
