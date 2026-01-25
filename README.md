@@ -75,6 +75,38 @@ npm run typecheck
   - Task/subagent prompts
   - Edit/Write/Read tool details
 - Response capture for agent's final messages
+- Missed events indicator with TAB key navigation
+
+### Theme Support
+- Light and dark themes with CSS custom properties
+- Toggle via UI button or system preference
+- Smooth transitions between themes
+- Preference saved to localStorage
+
+### Feedback System
+- Submit bug reports, improvement suggestions, or positive feedback
+- Automatic screenshot capture with html2canvas
+- Context capture (session info, recent events, console errors)
+- Status tab to track submission lifecycle:
+  - Submitted → Issue Created → In Progress → Complete/Failed
+- Real-time status polling
+
+### Automated Feedback Agents
+Two agents for end-to-end feedback automation:
+
+```bash
+# Issue Creator - Polls feedback and creates GitHub issues
+npm run agent:issues -- --cwd /path/to/project --repo owner/repo
+
+# Issue Poller - Watches GitHub for new issues and auto-fixes them
+npm run agent:poller -- --repos owner/repo --auto-fix --allowed-users username
+```
+
+Features:
+- Screenshot upload to GitHub (embedded in issues)
+- Duplicate detection for similar issues
+- Checkpoint/validation/rollback system for safe fixes
+- Status tracking through the full lifecycle
 
 ### Keyboard Shortcuts
 
@@ -83,7 +115,10 @@ npm run typecheck
 | `1-9` | Switch to session (or respond to permission prompt) |
 | `0` | All sessions |
 | `M` | Toggle 3D map visibility |
+| `F` | Open feedback modal |
 | `Tab` / `Esc` | Switch focus between scene and feed |
+| `Shift+Tab` | Navigate to previous missed event |
+| `Alt+Tab` | Navigate to next event |
 | `Enter` | Submit prompt (Shift+Enter for newline) |
 
 ## CLI Commands
