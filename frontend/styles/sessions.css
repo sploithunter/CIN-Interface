@@ -2,7 +2,7 @@
 
 /* Sessions Panel */
 #sessions-panel {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-secondary);
 }
 
 .attention-badge {
@@ -15,7 +15,7 @@
   font-size: 11px;
   font-weight: 700;
   color: #000;
-  background: #fbbf24;
+  background: var(--color-warning);
   border-radius: 9px;
   margin-left: 6px;
   animation: attention-badge-pulse 1.5s ease-in-out infinite;
@@ -35,17 +35,17 @@
 #new-session-btn {
   font-size: 11px;
   padding: 4px 10px;
-  background: rgba(74, 222, 128, 0.2);
-  border: 1px solid rgba(74, 222, 128, 0.4);
+  background: rgba(var(--color-success-rgb), 0.2);
+  border: 1px solid rgba(var(--color-success-rgb), 0.4);
   border-radius: 4px;
-  color: #4ade80;
+  color: var(--color-success);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 #new-session-btn:hover {
-  background: rgba(74, 222, 128, 0.3);
-  border-color: rgba(74, 222, 128, 0.6);
+  background: rgba(var(--color-success-rgb), 0.3);
+  border-color: rgba(var(--color-success-rgb), 0.6);
 }
 
 #sessions-list {
@@ -69,7 +69,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-1);
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
@@ -78,30 +78,30 @@
 }
 
 .session-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-3);
 }
 
 .session-item.active {
-  background: rgba(167, 139, 250, 0.12);
-  border-color: rgba(167, 139, 250, 0.3);
+  background: rgba(var(--accent-primary-rgb), 0.12);
+  border-color: rgba(var(--accent-primary-rgb), 0.3);
 }
 
 /* External sessions - dotted border to indicate view-only */
 .session-item.session-external {
-  border: 1px dashed rgba(251, 191, 36, 0.4);
+  border: 1px dashed rgba(var(--color-warning-rgb), 0.4);
 }
 
 .session-item.session-external.active {
-  border: 1px dashed rgba(251, 191, 36, 0.6);
-  background: rgba(251, 191, 36, 0.08);
+  border: 1px dashed rgba(var(--color-warning-rgb), 0.6);
+  background: rgba(var(--color-warning-rgb), 0.08);
 }
 
 .session-item.session-external:hover {
-  border-color: rgba(251, 191, 36, 0.5);
+  border-color: rgba(var(--color-warning-rgb), 0.5);
 }
 
 .session-item.active .session-name {
-  color: #c4b5fd;
+  color: var(--accent-secondary);
 }
 
 .session-item .session-icon {
@@ -120,35 +120,35 @@
 }
 
 .session-item .session-status.idle {
-  background: #4ade80;
-  box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
+  background: var(--color-success);
+  box-shadow: 0 0 8px rgba(var(--color-success-rgb), 0.4);
 }
 
 .session-item .session-status.working {
-  background: #fbbf24;
-  box-shadow: 0 0 8px rgba(251, 191, 36, 0.4);
+  background: var(--color-warning);
+  box-shadow: 0 0 8px rgba(var(--color-warning-rgb), 0.4);
   animation: pulse 1s infinite;
 }
 
 .session-item .session-status.waiting {
-  background: #fb923c;
+  background: var(--color-waiting);
   box-shadow: 0 0 8px rgba(251, 146, 60, 0.5);
   animation: pulse 0.5s infinite;
 }
 
 .session-item .session-status.offline {
-  background: #ef4444;
-  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+  background: var(--color-error-strong);
+  box-shadow: 0 0 6px rgba(var(--color-error-rgb), 0.4);
 }
 
 /* Offline session styling */
 .session-item:has(.session-status.offline) {
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background: rgba(var(--color-error-rgb), 0.08);
+  border: 1px solid rgba(var(--color-error-rgb), 0.2);
 }
 
 .session-item:has(.session-status.offline):hover {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(var(--color-error-rgb), 0.15);
 }
 
 .session-item .session-info {
@@ -159,7 +159,7 @@
 .session-item .session-name {
   font-size: 12px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -167,7 +167,7 @@
 
 .session-item .session-detail {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -175,12 +175,12 @@
 }
 
 .session-item .session-detail.working {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .session-item .session-prompt {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-ghost);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -200,7 +200,7 @@
   right: 4px;
   top: 50%;
   transform: translateY(-50%);
-  background: rgba(30, 30, 35, 0.95);
+  background: var(--bg-elevated);
   padding: 4px;
   border-radius: 4px;
   pointer-events: none;
@@ -214,27 +214,27 @@
 .session-item .session-actions button {
   padding: 4px 8px;
   font-size: 11px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-6);
   border: none;
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
   cursor: pointer;
   transition: all 0.1s;
 }
 
 .session-item .session-actions button:hover {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: var(--surface-6);
+  color: var(--text-primary);
 }
 
 .session-item .session-actions .delete-btn:hover {
-  background: rgba(248, 113, 113, 0.3);
-  color: #f87171;
+  background: rgba(var(--color-error-rgb), 0.3);
+  color: var(--color-error);
 }
 
 .session-item.all-sessions {
   margin-bottom: 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle);
   border-radius: 8px 8px 0 0;
   padding-bottom: 12px;
   /* Full width for "All Sessions" header */
@@ -242,27 +242,27 @@
 }
 
 .session-item.needs-attention {
-  background: rgba(251, 191, 36, 0.12);
-  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(var(--color-warning-rgb), 0.12);
+  border-color: rgba(var(--color-warning-rgb), 0.4);
   animation: attention-pulse 2s ease-in-out infinite;
 }
 
 .session-item.needs-attention .session-name {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .session-item .session-detail.attention {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 @keyframes attention-pulse {
   0%, 100% {
-    background: rgba(251, 191, 36, 0.12);
-    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    background: rgba(var(--color-warning-rgb), 0.12);
+    box-shadow: 0 0 0 0 rgba(var(--color-warning-rgb), 0);
   }
   50% {
-    background: rgba(251, 191, 36, 0.2);
-    box-shadow: 0 0 12px 0 rgba(251, 191, 36, 0.3);
+    background: rgba(var(--color-warning-rgb), 0.2);
+    box-shadow: 0 0 12px 0 rgba(var(--color-warning-rgb), 0.3);
   }
 }
 
@@ -270,22 +270,22 @@
   width: 18px;
   height: 18px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--surface-5);
+  border: 1px solid var(--border-primary);
   font-size: 10px;
   font-weight: 600;
   font-family: monospace;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   flex-shrink: 0;
 }
 
 .session-item.active .session-hotkey {
-  background: rgba(167, 139, 250, 0.2);
-  border-color: rgba(167, 139, 250, 0.4);
-  color: #c4b5fd;
+  background: rgba(var(--accent-primary-rgb), 0.2);
+  border-color: rgba(var(--accent-primary-rgb), 0.4);
+  color: var(--accent-secondary);
 }
 
 /* Session name row with badges */
@@ -305,37 +305,37 @@
   font-size: 10px;
   padding: 1px 4px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-5);
   cursor: help;
 }
 
 /* Agent type badges */
 .session-badge.agent-claude {
-  background: rgba(167, 139, 250, 0.2);
-  color: #c4b5fd;
+  background: rgba(var(--accent-primary-rgb), 0.2);
+  color: var(--accent-secondary);
 }
 
 .session-badge.agent-codex {
-  background: rgba(74, 222, 128, 0.2);
-  color: #4ade80;
+  background: rgba(var(--color-success-rgb), 0.2);
+  color: var(--color-success);
 }
 
 /* Session type badges */
 .session-badge.type-external {
-  background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
+  background: rgba(var(--color-warning-rgb), 0.15);
+  color: var(--color-warning);
 }
 
 .session-badge.type-internal {
-  background: rgba(96, 165, 250, 0.15);
-  color: #60a5fa;
+  background: rgba(var(--color-info-rgb), 0.15);
+  color: var(--color-info);
 }
 
 /* Offline Sessions Section */
 .offline-sessions-section {
   grid-column: 1 / -1;
   margin-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--border-subtle);
   padding-top: 8px;
 }
 
@@ -351,19 +351,19 @@
 }
 
 .offline-sessions-header:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-3);
 }
 
 .offline-toggle-icon {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   width: 12px;
 }
 
 .offline-label {
   font-size: 11px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -377,8 +377,8 @@
   padding: 0 5px;
   font-size: 10px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
-  background: rgba(239, 68, 68, 0.2);
+  color: var(--text-faint);
+  background: rgba(var(--color-error-rgb), 0.2);
   border-radius: 9px;
 }
 

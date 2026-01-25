@@ -3,11 +3,11 @@
 /* Context Menu - generic menu that appears at click location */
 .context-menu {
   position: fixed;
-  background: rgba(20, 20, 25, 0.95);
-  border: 1px solid rgba(167, 139, 250, 0.4);
+  background: var(--bg-tertiary);
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.4);
   border-radius: 8px;
   padding: 8px 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px var(--shadow-color);
   z-index: 900;
   opacity: 0;
   visibility: hidden;
@@ -35,11 +35,11 @@
 }
 
 .context-menu-item:hover {
-  background: rgba(167, 139, 250, 0.2);
+  background: rgba(var(--accent-primary-rgb), 0.2);
 }
 
 .context-menu-item.danger:hover {
-  background: rgba(248, 113, 113, 0.2);
+  background: rgba(var(--color-error-rgb), 0.2);
 }
 
 .context-menu-key {
@@ -49,50 +49,51 @@
   min-width: 22px;
   height: 22px;
   padding: 0 6px;
-  background: rgba(167, 139, 250, 0.3);
-  border: 1px solid rgba(167, 139, 250, 0.5);
+  background: rgba(var(--accent-primary-rgb), 0.3);
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.5);
   border-radius: 4px;
   font-size: 12px;
   font-weight: 600;
-  color: #a78bfa;
+  color: var(--accent-primary);
   font-family: monospace;
 }
 
 .context-menu-item.danger .context-menu-key {
-  background: rgba(248, 113, 113, 0.3);
-  border-color: rgba(248, 113, 113, 0.5);
-  color: #f87171;
+  background: rgba(var(--color-error-rgb), 0.3);
+  border-color: rgba(var(--color-error-rgb), 0.5);
+  color: var(--color-error);
 }
 
 .context-menu-label {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--text-tertiary);
 }
 
 .context-menu-item.danger .context-menu-label {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .context-menu-hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--border-secondary);
   text-align: center;
 }
 
 /* Common modal styles */
 .modal-content {
-  background: #1a1a1a;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
   border-radius: 12px;
   padding: 24px;
   width: 420px;
   max-width: 90vw;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 20px 60px var(--shadow-color);
   transform: scale(0.95) translateY(-10px);
   transition: transform 0.2s;
+  position: relative;
 }
 
 .modal-header {
@@ -103,21 +104,21 @@
 .modal-header h3 {
   font-size: 16px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   margin: 0;
 }
 
-/* Modal feedback button - small icon in upper-right corner */
+/* Modal feedback button */
 .modal-feedback-btn {
   position: absolute;
   top: 12px;
   right: 12px;
   width: 28px;
   height: 28px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
+  border: 1px solid var(--border-secondary);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   font-size: 14px;
   cursor: pointer;
   display: flex;
@@ -128,17 +129,9 @@
 }
 
 .modal-feedback-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.modal-feedback-btn:active {
-  transform: scale(0.95);
-}
-
-.modal-content {
-  position: relative; /* Ensure feedback button is positioned relative to modal */
+  background: var(--surface-6);
+  border-color: var(--border-primary);
+  color: var(--text-muted);
 }
 
 .modal-field {
@@ -149,17 +142,17 @@
   display: block;
   font-size: 13px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
   margin-bottom: 6px;
 }
 
 .modal-field input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 8px;
   padding: 12px 14px;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 14px;
   font-family: inherit;
   outline: none;
@@ -167,28 +160,28 @@
 }
 
 .modal-field input:focus {
-  border-color: #a78bfa;
-  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.2);
 }
 
 .modal-field input::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-ghost);
 }
 
 .modal-field .field-hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   margin-top: 6px;
 }
 
 .modal-field .field-hint code {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-6);
   padding: 1px 5px;
   border-radius: 3px;
   font-family: monospace;
 }
 
-/* Input with button (e.g., directory input with browse) */
+/* Input with button */
 .input-with-button {
   display: flex;
   gap: 8px;
@@ -201,8 +194,8 @@
 .browse-btn {
   width: 44px;
   height: 44px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 8px;
   cursor: pointer;
   font-size: 18px;
@@ -214,8 +207,8 @@
 }
 
 .browse-btn:hover {
-  background: rgba(167, 139, 250, 0.2);
-  border-color: rgba(167, 139, 250, 0.4);
+  background: rgba(var(--accent-primary-rgb), 0.2);
+  border-color: rgba(var(--accent-primary-rgb), 0.4);
 }
 
 .modal-actions {
@@ -236,26 +229,26 @@
 }
 
 .modal-btn-cancel {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--surface-5);
+  border-color: var(--border-primary);
+  color: var(--text-muted);
 }
 
 .modal-btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--surface-6);
+  color: var(--text-primary);
 }
 
 .modal-btn-create {
-  background: rgba(74, 222, 128, 0.2);
-  border-color: rgba(74, 222, 128, 0.4);
-  color: #4ade80;
+  background: rgba(var(--color-success-rgb), 0.2);
+  border-color: rgba(var(--color-success-rgb), 0.4);
+  color: var(--color-success);
 }
 
 .modal-btn-create:hover {
-  background: rgba(74, 222, 128, 0.3);
-  border-color: rgba(74, 222, 128, 0.6);
-  box-shadow: 0 0 20px rgba(74, 222, 128, 0.15);
+  background: rgba(var(--color-success-rgb), 0.3);
+  border-color: rgba(var(--color-success-rgb), 0.6);
+  box-shadow: 0 0 20px rgba(var(--color-success-rgb), 0.15);
 }
 
 .modal-checkboxes {
@@ -269,20 +262,20 @@
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .modal-checkbox:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--surface-4);
+  border-color: var(--border-secondary);
 }
 
 .modal-checkbox input[type="checkbox"] {
-  accent-color: #a78bfa;
+  accent-color: var(--accent-primary);
   width: 16px;
   height: 16px;
   flex-shrink: 0;
@@ -290,16 +283,16 @@
 
 .modal-checkbox .checkbox-label {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary);
 }
 
 .modal-checkbox .checkbox-label code {
   font-size: 11px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-6);
   padding: 1px 5px;
   border-radius: 3px;
   margin-left: 6px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
 }
 
 /* Agent Selector */
@@ -313,8 +306,8 @@
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s;
@@ -322,17 +315,17 @@
 }
 
 .modal-agent-option:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--surface-4);
+  border-color: var(--border-primary);
 }
 
 .modal-agent-option:has(input:checked) {
-  background: rgba(167, 139, 250, 0.15);
-  border-color: rgba(167, 139, 250, 0.4);
+  background: rgba(var(--accent-primary-rgb), 0.15);
+  border-color: rgba(var(--accent-primary-rgb), 0.4);
 }
 
 .modal-agent-option input[type="radio"] {
-  accent-color: #a78bfa;
+  accent-color: var(--accent-primary);
   width: 16px;
   height: 16px;
 }
@@ -340,13 +333,12 @@
 .modal-agent-option .agent-label {
   font-size: 14px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary);
 }
 
-/* Codex-specific agent styling */
 .modal-agent-option:has(input[value="codex"]):has(input:checked) {
-  background: rgba(74, 222, 128, 0.15);
-  border-color: rgba(74, 222, 128, 0.4);
+  background: rgba(var(--color-success-rgb), 0.15);
+  border-color: rgba(var(--color-success-rgb), 0.4);
 }
 
 /* Select dropdown styling */
@@ -354,27 +346,27 @@
   width: 100%;
   padding: 10px 12px;
   font-size: 14px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
+  border: 1px solid var(--border-secondary);
   border-radius: 6px;
-  color: #fff;
+  color: var(--text-primary);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .modal-field select:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--border-primary);
 }
 
 .modal-field select:focus {
   outline: none;
-  border-color: rgba(167, 139, 250, 0.5);
-  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.1);
+  border-color: rgba(var(--accent-primary-rgb), 0.5);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.1);
 }
 
 .modal-field select option {
-  background: #1a1a1e;
-  color: #fff;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 /* New Session Modal */
@@ -384,7 +376,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--bg-overlay);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -411,7 +403,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--bg-overlay);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -435,10 +427,10 @@
 
 .settings-action-btn {
   padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--surface-3);
+  border: 1px solid var(--border-primary);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-tertiary);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s;
@@ -446,8 +438,8 @@
 }
 
 .settings-action-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--surface-6);
+  border-color: var(--border-primary);
 }
 
 /* Settings port input */
@@ -458,24 +450,24 @@
 }
 
 .port-label {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
   font-family: monospace;
 }
 
 #settings-port {
   width: 80px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 6px;
   padding: 8px 10px;
-  color: #fff;
+  color: var(--text-primary);
   font-family: monospace;
   font-size: 14px;
   outline: none;
 }
 
 #settings-port:focus {
-  border-color: #a78bfa;
+  border-color: var(--accent-primary);
 }
 
 .port-status {
@@ -483,26 +475,26 @@
 }
 
 .port-status.connected {
-  color: #4ade80;
+  color: var(--color-success);
 }
 
 .port-status.disconnected {
-  color: #f87171;
+  color: var(--color-error);
 }
 
-/* Settings sliders (volume, grid size, etc.) */
+/* Settings sliders */
 .settings-slider-row {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-top: 12px;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-2);
   border-radius: 6px;
 }
 
 .slider-label {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
   font-size: 13px;
   min-width: 65px;
 }
@@ -512,7 +504,7 @@
   height: 6px;
   -webkit-appearance: none;
   appearance: none;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-6);
   border-radius: 3px;
   cursor: pointer;
 }
@@ -522,7 +514,7 @@
   appearance: none;
   width: 16px;
   height: 16px;
-  background: #22d3ee;
+  background: var(--color-cyan);
   border-radius: 50%;
   cursor: pointer;
   transition: transform 0.1s, box-shadow 0.1s;
@@ -530,20 +522,20 @@
 
 .settings-slider::-webkit-slider-thumb:hover {
   transform: scale(1.15);
-  box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+  box-shadow: 0 0 8px rgba(var(--color-cyan-rgb), 0.5);
 }
 
 .settings-slider::-moz-range-thumb {
   width: 16px;
   height: 16px;
-  background: #22d3ee;
+  background: var(--color-cyan);
   border-radius: 50%;
   border: none;
   cursor: pointer;
 }
 
 .slider-value {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   font-size: 12px;
   font-family: monospace;
   min-width: 35px;
@@ -557,7 +549,7 @@
   gap: 12px;
   margin-top: 8px;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-1);
   border-radius: 6px;
 }
 
@@ -566,21 +558,73 @@
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
 .checkbox-label input[type="checkbox"] {
   width: 16px;
   height: 16px;
-  accent-color: #22d3ee;
+  accent-color: var(--color-cyan);
   cursor: pointer;
 }
 
 .field-hint-inline {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   font-size: 11px;
   margin-left: auto;
+}
+
+/* Theme toggle row */
+.settings-theme-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+
+.theme-toggle-label {
+  color: var(--text-faint);
+  font-size: 13px;
+  flex: 1;
+}
+
+.theme-toggle-btn {
+  display: flex;
+  background: var(--surface-4);
+  border: 1px solid var(--border-secondary);
+  border-radius: 20px;
+  padding: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.theme-toggle-btn:hover {
+  border-color: var(--border-primary);
+}
+
+.theme-option {
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.theme-option.active {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.theme-option:not(.active):hover {
+  color: var(--text-primary);
 }
 
 /* Keybind Settings */
@@ -599,7 +643,7 @@
 
 .keybind-name {
   flex: 1;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-tertiary);
   font-size: 13px;
 }
 
@@ -610,11 +654,11 @@
 }
 
 .keybind-key {
-  background: rgba(30, 30, 40, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
   border-radius: 4px;
   padding: 4px 10px;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary);
   font-family: monospace;
   font-size: 12px;
   cursor: pointer;
@@ -624,13 +668,13 @@
 }
 
 .keybind-key:hover {
-  background: rgba(50, 50, 70, 0.8);
-  border-color: rgba(167, 139, 250, 0.5);
+  background: var(--surface-4);
+  border-color: rgba(var(--accent-primary-rgb), 0.5);
 }
 
 .keybind-key.editing {
-  background: rgba(167, 139, 250, 0.3);
-  border-color: #a78bfa;
+  background: rgba(var(--accent-primary-rgb), 0.3);
+  border-color: var(--accent-primary);
   color: white;
   animation: keybind-pulse 1s ease-in-out infinite;
 }
@@ -642,24 +686,24 @@
 
 .keybind-add {
   background: transparent;
-  border: 1px dashed rgba(255, 255, 255, 0.3);
+  border: 1px dashed var(--border-primary);
   border-radius: 4px;
   padding: 4px 10px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .keybind-add:hover {
-  border-color: rgba(167, 139, 250, 0.5);
-  color: rgba(255, 255, 255, 0.8);
+  border-color: rgba(var(--accent-primary-rgb), 0.5);
+  color: var(--text-tertiary);
 }
 
 .keybind-add.editing {
-  background: rgba(167, 139, 250, 0.3);
+  background: rgba(var(--accent-primary-rgb), 0.3);
   border-style: solid;
-  border-color: #a78bfa;
+  border-color: var(--accent-primary);
   color: white;
   animation: keybind-pulse 1s ease-in-out infinite;
 }
@@ -668,14 +712,14 @@
   background: transparent;
   border: none;
   padding: 4px 8px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   font-size: 14px;
   cursor: pointer;
   transition: color 0.15s;
 }
 
 .keybind-reset:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-tertiary);
 }
 
 /* About Modal */
@@ -685,7 +729,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--bg-modal-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -715,18 +759,18 @@
 }
 
 .about-description p {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-tertiary);
   line-height: 1.6;
   margin: 0 0 8px 0;
 }
 
 .about-subtitle {
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: var(--text-dim) !important;
   font-size: 13px;
 }
 
 .about-section {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--code-bg);
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
@@ -737,13 +781,13 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   margin-bottom: 12px;
 }
 
 .about-help-text {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
   line-height: 1.5;
   margin-bottom: 12px;
 }
@@ -751,7 +795,7 @@
 .about-help-text em,
 .about-cmd code em {
   font-style: normal;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
 }
 
 .about-commands {
@@ -768,22 +812,22 @@
 }
 
 .about-cmd code {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--code-bg);
   padding: 4px 8px;
   border-radius: 4px;
   font-family: 'SF Mono', Monaco, monospace;
-  color: #22d3ee;
+  color: var(--color-cyan);
   font-size: 12px;
 }
 
 .about-cmd span {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   font-size: 12px;
 }
 
 .about-footer {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   margin-bottom: 16px;
 }
 
@@ -796,7 +840,7 @@
 }
 
 .about-credit {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-ghost);
 }
 
 /* Question Modal */
@@ -806,7 +850,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--bg-modal-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -828,8 +872,8 @@
 
 .question-badge {
   display: inline-block;
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  background: rgba(var(--color-warning-rgb), 0.2);
+  color: var(--color-warning);
   padding: 4px 10px;
   border-radius: 12px;
   font-size: 11px;
@@ -840,7 +884,7 @@
 }
 
 .question-text {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary);
   font-size: 15px;
   line-height: 1.5;
   margin-bottom: 20px;
@@ -856,8 +900,8 @@
 .question-option {
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--input-bg);
+  border: 1px solid var(--border-secondary);
   border-radius: 8px;
   padding: 12px 16px;
   cursor: pointer;
@@ -866,18 +910,18 @@
 }
 
 .question-option:hover {
-  background: rgba(167, 139, 250, 0.15);
-  border-color: rgba(167, 139, 250, 0.4);
+  background: rgba(var(--accent-primary-rgb), 0.15);
+  border-color: rgba(var(--accent-primary-rgb), 0.4);
 }
 
 .question-option-label {
-  color: #fff;
+  color: var(--text-primary);
   font-size: 14px;
   font-weight: 500;
 }
 
 .question-option-desc {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   font-size: 12px;
   margin-top: 4px;
 }
@@ -885,23 +929,23 @@
 .question-other {
   margin-bottom: 16px;
   padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--border-secondary);
 }
 
 .question-other label {
   display: block;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   margin-bottom: 8px;
 }
 
 .question-other textarea {
   width: 100%;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--input-bg);
+  border: 1px solid var(--border-secondary);
   border-radius: 8px;
   padding: 10px 12px;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 14px;
   font-family: inherit;
   resize: vertical;
@@ -909,8 +953,8 @@
 
 .question-other textarea:focus {
   outline: none;
-  border-color: #a78bfa;
-  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.2);
 }
 
 /* Permission Modal */
@@ -920,7 +964,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--bg-modal-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -954,21 +998,21 @@
 }
 
 .permission-tool {
-  color: #a78bfa;
+  color: var(--accent-primary);
   font-family: monospace;
-  background: rgba(167, 139, 250, 0.15);
+  background: rgba(var(--accent-primary-rgb), 0.15);
   padding: 2px 8px;
   border-radius: 4px;
 }
 
 .permission-context {
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--code-bg);
+  border: 1px solid var(--border-secondary);
   border-radius: 8px;
   padding: 12px;
   font-family: monospace;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   white-space: pre-wrap;
   overflow-x: auto;
   max-height: 200px;
@@ -1010,7 +1054,6 @@
   flex-shrink: 0;
 }
 
-/* Option 1 is typically "Yes" - green */
 .permission-btn[data-option="1"] {
   background: rgba(34, 197, 94, 0.15);
   color: #22c55e;
@@ -1023,7 +1066,6 @@
   background: rgba(34, 197, 94, 0.3);
 }
 
-/* Option 2 is typically "Always" - blue */
 .permission-btn[data-option="2"] {
   background: rgba(59, 130, 246, 0.15);
   color: #3b82f6;
@@ -1036,20 +1078,18 @@
   background: rgba(59, 130, 246, 0.3);
 }
 
-/* Option 3 is typically "No" - red */
 .permission-btn[data-option="3"] {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(var(--color-error-rgb), 0.15);
+  color: var(--color-error-strong);
+  border-color: rgba(var(--color-error-rgb), 0.3);
 }
 .permission-btn[data-option="3"]:hover {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(var(--color-error-rgb), 0.25);
 }
 .permission-btn[data-option="3"] .permission-btn-num {
-  background: rgba(239, 68, 68, 0.3);
+  background: rgba(var(--color-error-rgb), 0.3);
 }
 
-/* Options 4+ are neutral - gray */
 .permission-btn[data-option="4"],
 .permission-btn[data-option="5"],
 .permission-btn[data-option="6"] {
@@ -1075,7 +1115,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--bg-modal-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1106,28 +1146,28 @@
   font-size: 24px;
   font-weight: 600;
   margin-bottom: 12px;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .not-connected-content p {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
   margin-bottom: 16px;
   line-height: 1.6;
 }
 
 .not-connected-description {
   font-size: 16px;
-  color: rgba(255, 255, 255, 0.8) !important;
+  color: var(--text-tertiary) !important;
 }
 
 .not-connected-privacy {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: var(--text-dim) !important;
   margin-bottom: 28px !important;
 }
 
 .not-connected-setup {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--code-bg);
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 24px;
@@ -1139,23 +1179,23 @@
 }
 
 .not-connected-code {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--surface-6);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
   padding: 16px 24px;
   font-family: monospace;
   font-size: 16px;
-  color: #4ade80;
+  color: var(--color-success);
   user-select: all;
 }
 
 .not-connected-hint {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
 }
 
 .not-connected-hint a {
-  color: #a78bfa;
+  color: var(--accent-primary);
   text-decoration: none;
 }
 
@@ -1180,25 +1220,25 @@
 }
 
 .not-connected-btn-retry {
-  background: rgba(167, 139, 250, 0.2);
-  border-color: rgba(167, 139, 250, 0.4);
-  color: #a78bfa;
+  background: rgba(var(--accent-primary-rgb), 0.2);
+  border-color: rgba(var(--accent-primary-rgb), 0.4);
+  color: var(--accent-primary);
 }
 
 .not-connected-btn-retry:hover {
-  background: rgba(167, 139, 250, 0.3);
+  background: rgba(var(--accent-primary-rgb), 0.3);
 }
 
 .not-connected-btn-settings,
 .not-connected-btn-explore {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--surface-6);
+  border-color: var(--border-primary);
+  color: var(--text-tertiary);
 }
 
 .not-connected-btn-settings:hover,
 .not-connected-btn-explore:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-6);
 }
 
 /* Zone Timeout Modal */
@@ -1208,7 +1248,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: var(--bg-modal-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1229,14 +1269,14 @@
 }
 
 .zone-timeout-text {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-tertiary);
   font-size: 14px;
   line-height: 1.5;
   margin-bottom: 16px;
 }
 
 .zone-timeout-hint {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   font-size: 12px;
   margin-top: 12px;
   margin-bottom: 16px;
@@ -1248,7 +1288,7 @@
   top: 16px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(248, 113, 113, 0.95);
+  background: rgba(var(--color-error-rgb), 0.95);
   color: white;
   padding: 10px 16px;
   border-radius: 8px;
@@ -1257,7 +1297,7 @@
   align-items: center;
   gap: 12px;
   z-index: 3000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px var(--shadow-color-strong);
 }
 
 .offline-banner.hidden {
@@ -1279,17 +1319,14 @@
   opacity: 1;
 }
 
-/* ============================================================================
-   Text Label Modal - for hex grid text labels
-   ============================================================================ */
-
+/* Text Label Modal */
 #text-label-modal {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1317,10 +1354,10 @@
   min-height: 120px;
   max-height: 300px;
   padding: 14px 16px;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(74, 200, 232, 0.3);
+  background: var(--code-bg);
+  border: 1px solid rgba(var(--color-cyan-rgb), 0.3);
   border-radius: 8px;
-  color: white;
+  color: var(--text-primary);
   font-size: 15px;
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   line-height: 1.5;
@@ -1330,12 +1367,12 @@
 
 .text-label-textarea:focus {
   outline: none;
-  border-color: rgba(74, 200, 232, 0.6);
-  box-shadow: 0 0 0 3px rgba(74, 200, 232, 0.15);
+  border-color: rgba(var(--color-cyan-rgb), 0.6);
+  box-shadow: 0 0 0 3px rgba(var(--color-cyan-rgb), 0.15);
 }
 
 .text-label-textarea::placeholder {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
 }
 
 .text-label-footer {
@@ -1348,26 +1385,23 @@
 
 .text-label-char-count {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 .text-label-hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-ghost);
 }
 
-/* ============================================================================
-   ZONE INFO MODAL
-   ============================================================================ */
-
+/* Zone Info Modal */
 #zone-info-modal {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1383,8 +1417,8 @@
 }
 
 .zone-info-modal-content {
-  background: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
   border-radius: 12px;
   width: 90%;
   max-width: 480px;
@@ -1400,19 +1434,19 @@
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-secondary);
 }
 
 .zone-info-modal-content .modal-header h3 {
   margin: 0;
   font-size: 16px;
-  color: #a78bfa;
+  color: var(--accent-primary);
 }
 
 .zone-info-close-btn {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   font-size: 24px;
   cursor: pointer;
   padding: 0;
@@ -1426,11 +1460,10 @@
 }
 
 .zone-info-close-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--surface-6);
+  color: var(--text-primary);
 }
 
-/* Move feedback button to left side when close button is on right */
 .zone-info-modal-content .modal-feedback-btn {
   right: auto;
   left: 12px;
@@ -1442,7 +1475,6 @@
   flex: 1;
 }
 
-/* Header */
 .zone-info-header {
   display: flex;
   align-items: center;
@@ -1453,7 +1485,7 @@
 .zone-info-name {
   font-size: 20px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .zone-info-status {
@@ -1466,30 +1498,29 @@
 }
 
 .zone-info-status--idle {
-  background: rgba(74, 222, 128, 0.2);
-  color: #4ade80;
+  background: rgba(var(--color-success-rgb), 0.2);
+  color: var(--color-success);
 }
 
 .zone-info-status--working {
-  background: rgba(34, 211, 238, 0.2);
-  color: #22d3ee;
+  background: rgba(var(--color-cyan-rgb), 0.2);
+  color: var(--color-cyan);
 }
 
 .zone-info-status--waiting {
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  background: rgba(var(--color-warning-rgb), 0.2);
+  color: var(--color-warning);
 }
 
 .zone-info-status--offline {
-  background: rgba(248, 113, 113, 0.2);
-  color: #f87171;
+  background: rgba(var(--color-error-rgb), 0.2);
+  color: var(--color-error);
 }
 
-/* Sections */
 .zone-info-section {
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .zone-info-section:last-child {
@@ -1503,11 +1534,10 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   margin-bottom: 12px;
 }
 
-/* Rows */
 .zone-info-row {
   display: flex;
   justify-content: space-between;
@@ -1522,13 +1552,13 @@
 
 .zone-info-label {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   flex-shrink: 0;
 }
 
 .zone-info-value {
   font-size: 13px;
-  color: #fff;
+  color: var(--text-primary);
   text-align: right;
   word-break: break-all;
 }
@@ -1540,19 +1570,18 @@
 
 .zone-info-small {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
 }
 
 .zone-info-highlight {
-  color: #22d3ee;
+  color: var(--color-cyan);
 }
 
 .zone-info-muted {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   font-style: italic;
 }
 
-/* Stats Grid */
 .zone-info-stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1560,7 +1589,7 @@
 }
 
 .zone-info-stat {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-3);
   border-radius: 8px;
   padding: 12px;
   text-align: center;
@@ -1569,17 +1598,16 @@
 .zone-info-stat-value {
   font-size: 24px;
   font-weight: 600;
-  color: #a78bfa;
+  color: var(--accent-primary);
   line-height: 1;
 }
 
 .zone-info-stat-label {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
   margin-top: 6px;
 }
 
-/* Tokens */
 .zone-info-tokens {
   display: flex;
   flex-direction: column;
@@ -1593,15 +1621,14 @@
 }
 
 .zone-info-token-row span:first-child {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
 }
 
 .zone-info-token-value {
-  color: #fbbf24;
+  color: var(--color-warning);
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Git Status */
 .zone-info-git-branch {
   display: flex;
   align-items: center;
@@ -1610,35 +1637,35 @@
 }
 
 .zone-info-branch-icon {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
 }
 
 .zone-info-branch-name {
-  color: #fff;
+  color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 14px;
   font-weight: 500;
 }
 
 .zone-info-branch-ahead {
-  color: #4ade80;
+  color: var(--color-success);
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 .zone-info-branch-behind {
-  color: #f87171;
+  color: var(--color-error);
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 .zone-info-branch-dirty {
-  color: #fbbf24;
+  color: var(--color-warning);
   margin-left: auto;
 }
 
 .zone-info-branch-clean {
-  color: #4ade80;
+  color: var(--color-success);
   margin-left: auto;
 }
 
@@ -1651,7 +1678,7 @@
 }
 
 .zone-info-changes-label {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-dim);
 }
 
 .zone-info-changes-detail {
@@ -1660,19 +1687,19 @@
 }
 
 .zone-info-added {
-  color: #4ade80;
+  color: var(--color-success);
 }
 
 .zone-info-modified {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .zone-info-deleted {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .zone-info-git-clean {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   font-size: 13px;
   font-style: italic;
 }
@@ -1683,30 +1710,29 @@
   font-size: 13px;
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .zone-info-git-commit {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .zone-info-commit-msg {
   display: block;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .zone-info-commit-time {
   display: block;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   margin-top: 4px;
 }
 
-/* Files */
 .zone-info-files {
   display: flex;
   flex-direction: column;
@@ -1718,25 +1744,21 @@
 .zone-info-file {
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, monospace;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-3);
   border-radius: 4px;
 }
 
-/* IDs section (collapsed by default) */
 .zone-info-ids {
   opacity: 0.7;
 }
 
 .zone-info-ids .zone-info-section-title {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-ghost);
 }
 
-/* ============================================================================
-   Zone Command Modal - Quick command input near zone
-   ============================================================================ */
-
+/* Zone Command Modal */
 .zone-command-modal {
   position: fixed;
   top: 0;
@@ -1759,12 +1781,12 @@
 .zone-command-content {
   position: absolute;
   width: 320px;
-  background: rgba(15, 20, 30, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
   border-radius: 16px;
   padding: 12px 14px;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 8px 32px var(--shadow-color),
     0 0 0 1px rgba(255, 255, 255, 0.05) inset;
   backdrop-filter: blur(20px);
   transform: translateY(10px) scale(0.95);
@@ -1793,7 +1815,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #4ade80;
+  background: var(--color-success);
   flex-shrink: 0;
   animation: zone-command-pulse 2s ease-in-out infinite;
 }
@@ -1811,7 +1833,7 @@
 
 .zone-command-hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-ghost);
 }
 
 .zone-command-body {
@@ -1825,10 +1847,10 @@
   min-height: 42px;
   max-height: 150px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--input-bg);
+  border: 1px solid var(--border-secondary);
   border-radius: 12px;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 14px;
   font-family: inherit;
   line-height: 1.4;
@@ -1838,18 +1860,18 @@
 }
 
 .zone-command-input:focus {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(167, 139, 250, 0.5);
-  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15);
+  background: var(--surface-5);
+  border-color: rgba(var(--accent-primary-rgb), 0.5);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.15);
 }
 
 .zone-command-input::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-ghost);
 }
 
 .zone-command-input.error {
   animation: zone-command-shake 0.4s ease;
-  border-color: rgba(248, 113, 113, 0.6);
+  border-color: rgba(var(--color-error-rgb), 0.6);
 }
 
 @keyframes zone-command-shake {
@@ -1862,9 +1884,9 @@
   width: 42px;
   height: 42px;
   border-radius: 12px;
-  background: linear-gradient(135deg, rgba(74, 222, 128, 0.2), rgba(74, 200, 232, 0.2));
-  border: 1px solid rgba(74, 222, 128, 0.3);
-  color: #4ade80;
+  background: linear-gradient(135deg, rgba(var(--color-success-rgb), 0.2), rgba(var(--color-cyan-rgb), 0.2));
+  border: 1px solid rgba(var(--color-success-rgb), 0.3);
+  color: var(--color-success);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1874,9 +1896,9 @@
 }
 
 .zone-command-send:hover {
-  background: linear-gradient(135deg, rgba(74, 222, 128, 0.3), rgba(74, 200, 232, 0.3));
-  border-color: rgba(74, 222, 128, 0.5);
-  box-shadow: 0 0 20px rgba(74, 222, 128, 0.2);
+  background: linear-gradient(135deg, rgba(var(--color-success-rgb), 0.3), rgba(var(--color-cyan-rgb), 0.3));
+  border-color: rgba(var(--color-success-rgb), 0.5);
+  box-shadow: 0 0 20px rgba(var(--color-success-rgb), 0.2);
   transform: scale(1.05);
 }
 
@@ -1904,7 +1926,6 @@
   to { transform: rotate(360deg); }
 }
 
-/* Connector line from modal to zone */
 .zone-command-connector {
   position: fixed;
   height: 2px;
@@ -1917,7 +1938,6 @@
   opacity: 1;
 }
 
-/* Scrollbar for textarea */
 .zone-command-input::-webkit-scrollbar {
   width: 6px;
 }
@@ -1927,29 +1947,23 @@
 }
 
 .zone-command-input::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 .zone-command-input::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--scrollbar-thumb-hover);
 }
 
-/* =============================================================================
-   Feedback Button & Modal
-   ============================================================================= */
-
-/* Floating feedback button - positioned in lower-right corner of 3D viewport (left pane) */
-/* Above the keybinds bar, left of the feed panel sidebar */
+/* Feedback Button & Modal */
 .feedback-btn {
   position: fixed;
-  bottom: 72px; /* Above the keybinds bar at bottom */
-  /* Feed panel (right sidebar) is 40% wide, position button just to its left */
+  bottom: 72px;
   right: calc(40% + 24px);
   width: 44px;
   height: 44px;
-  background: rgba(30, 30, 35, 0.9);
-  border: 1px solid rgba(167, 139, 250, 0.4);
+  background: var(--bg-elevated);
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.4);
   border-radius: 50%;
   cursor: pointer;
   display: flex;
@@ -1957,28 +1971,27 @@
   justify-content: center;
   transition: all 0.2s;
   z-index: 100;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px var(--shadow-color-strong);
 }
 
 .feedback-btn:hover {
-  background: rgba(167, 139, 250, 0.2);
-  border-color: rgba(167, 139, 250, 0.6);
+  background: rgba(var(--accent-primary-rgb), 0.2);
+  border-color: rgba(var(--accent-primary-rgb), 0.6);
   transform: scale(1.05);
-  box-shadow: 0 6px 20px rgba(167, 139, 250, 0.2);
+  box-shadow: 0 6px 20px rgba(var(--accent-primary-rgb), 0.2);
 }
 
 .feedback-btn-icon {
   font-size: 18px;
 }
 
-/* Feedback modal container */
 #feedback-modal {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--bg-overlay);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -2002,7 +2015,6 @@
   width: 400px;
 }
 
-/* Type selector - radio buttons styled as segmented control */
 .feedback-type-selector {
   display: flex;
   gap: 8px;
@@ -2024,24 +2036,24 @@
   align-items: center;
   gap: 4px;
   padding: 12px 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
+  border: 1px solid var(--border-secondary);
   border-radius: 8px;
   transition: all 0.15s;
 }
 
 .feedback-type-option input[type="radio"]:checked + .feedback-type-label {
-  background: rgba(167, 139, 250, 0.15);
-  border-color: rgba(167, 139, 250, 0.5);
+  background: rgba(var(--accent-primary-rgb), 0.15);
+  border-color: rgba(var(--accent-primary-rgb), 0.5);
 }
 
 .feedback-type-option:hover .feedback-type-label {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--surface-5);
+  border-color: var(--border-primary);
 }
 
 .feedback-type-option input[type="radio"]:checked + .feedback-type-label:hover {
-  background: rgba(167, 139, 250, 0.2);
+  background: rgba(var(--accent-primary-rgb), 0.2);
 }
 
 .feedback-type-icon {
@@ -2051,21 +2063,20 @@
 .feedback-type-text {
   font-size: 12px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
 }
 
 .feedback-type-option input[type="radio"]:checked + .feedback-type-label .feedback-type-text {
-  color: #a78bfa;
+  color: var(--accent-primary);
 }
 
-/* Textarea */
 .feedback-textarea {
   width: 100%;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 8px;
   padding: 12px 14px;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 14px;
   font-family: inherit;
   resize: vertical;
@@ -2075,15 +2086,14 @@
 }
 
 .feedback-textarea:focus {
-  border-color: #a78bfa;
-  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.2);
 }
 
 .feedback-textarea::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-ghost);
 }
 
-/* Context info */
 .feedback-context-info {
   margin-top: 12px;
   margin-bottom: 8px;
@@ -2091,10 +2101,9 @@
 
 .feedback-context-label {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
 }
 
-/* Submit button spinner */
 #feedback-submit {
   display: flex;
   align-items: center;
@@ -2105,8 +2114,8 @@
 #feedback-submit .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(74, 222, 128, 0.3);
-  border-top-color: #4ade80;
+  border: 2px solid rgba(var(--color-success-rgb), 0.3);
+  border-top-color: var(--color-success);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -2120,16 +2129,12 @@
   cursor: not-allowed;
 }
 
-/* =============================================================================
-   Feedback Status Tab
-   ============================================================================= */
-
-/* Tab navigation */
+/* Feedback Status Tab */
 .feedback-tabs {
   display: flex;
   gap: 4px;
   margin-bottom: 20px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-3);
   border-radius: 8px;
   padding: 4px;
 }
@@ -2140,7 +2145,7 @@
   background: transparent;
   border: none;
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -2152,16 +2157,15 @@
 }
 
 .feedback-tab:hover {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  background: var(--surface-4);
 }
 
 .feedback-tab.active {
-  background: rgba(167, 139, 250, 0.2);
-  color: #a78bfa;
+  background: rgba(var(--accent-primary-rgb), 0.2);
+  color: var(--accent-primary);
 }
 
-/* Status count badge */
 .feedback-status-count {
   display: inline-flex;
   align-items: center;
@@ -2169,18 +2173,17 @@
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  background: rgba(167, 139, 250, 0.3);
+  background: rgba(var(--accent-primary-rgb), 0.3);
   border-radius: 9px;
   font-size: 11px;
   font-weight: 600;
-  color: #a78bfa;
+  color: var(--accent-primary);
 }
 
 .feedback-status-count.hidden {
   display: none;
 }
 
-/* Tab content */
 .feedback-tab-content {
   min-height: 200px;
 }
@@ -2189,7 +2192,6 @@
   display: none;
 }
 
-/* Status list */
 .feedback-status-list {
   display: flex;
   flex-direction: column;
@@ -2208,38 +2210,35 @@
 }
 
 .feedback-status-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 .feedback-status-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--scrollbar-thumb-hover);
 }
 
-/* Empty state */
 .feedback-status-empty {
   text-align: center;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
   font-size: 14px;
   padding: 40px 20px;
 }
 
-/* Status item */
 .feedback-status-item {
   position: relative;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-3);
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
   padding: 14px 16px;
   transition: all 0.15s;
 }
 
 .feedback-status-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--surface-4);
+  border-color: var(--border-secondary);
 }
 
-/* Item header */
 .feedback-status-item-header {
   display: flex;
   justify-content: space-between;
@@ -2247,7 +2246,6 @@
   margin-bottom: 10px;
 }
 
-/* Status badge */
 .feedback-status-badge {
   display: inline-flex;
   align-items: center;
@@ -2260,37 +2258,35 @@
 }
 
 .feedback-status-badge.status-pending {
-  background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
+  background: rgba(var(--color-warning-rgb), 0.15);
+  color: var(--color-warning);
 }
 
 .feedback-status-badge.status-issue-created {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
+  background: rgba(var(--color-info-rgb), 0.15);
+  color: var(--color-info);
 }
 
 .feedback-status-badge.status-in-progress {
-  background: rgba(167, 139, 250, 0.15);
-  color: #a78bfa;
+  background: rgba(var(--accent-primary-rgb), 0.15);
+  color: var(--accent-primary);
 }
 
 .feedback-status-badge.status-complete {
-  background: rgba(74, 222, 128, 0.15);
-  color: #4ade80;
+  background: rgba(var(--color-success-rgb), 0.15);
+  color: var(--color-success);
 }
 
 .feedback-status-badge.status-failed {
-  background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
+  background: rgba(var(--color-error-rgb), 0.15);
+  color: var(--color-error);
 }
 
-/* Time ago */
 .feedback-status-time {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-subtle);
 }
 
-/* Item body */
 .feedback-status-item-body {
   display: flex;
   align-items: flex-start;
@@ -2304,29 +2300,27 @@
 
 .feedback-status-description {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-tertiary);
   line-height: 1.4;
   word-break: break-word;
 }
 
-/* Fixer message */
 .feedback-status-message {
   margin-top: 10px;
   padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--code-bg);
   border-radius: 6px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-faint);
   line-height: 1.4;
 }
 
-/* GitHub issue link */
 .feedback-status-link {
   display: inline-flex;
   align-items: center;
   margin-top: 10px;
   font-size: 12px;
-  color: #3b82f6;
+  color: var(--color-info);
   text-decoration: none;
   transition: color 0.15s;
 }
@@ -2336,7 +2330,6 @@
   text-decoration: underline;
 }
 
-/* Remove button */
 .feedback-status-remove {
   position: absolute;
   top: 10px;
@@ -2346,7 +2339,7 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-ghost);
   font-size: 16px;
   cursor: pointer;
   display: flex;
@@ -2361,11 +2354,10 @@
 }
 
 .feedback-status-remove:hover {
-  background: rgba(248, 113, 113, 0.2);
-  color: #f87171;
+  background: rgba(var(--color-error-rgb), 0.2);
+  color: var(--color-error);
 }
 
-/* Status tab close button */
 #feedback-status-close {
   width: 100%;
   margin-top: 16px;

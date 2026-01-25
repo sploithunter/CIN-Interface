@@ -61,6 +61,7 @@ import { drawMode } from './ui/DrawMode'
 import { setupTextLabelModal, showTextLabelModal } from './ui/TextLabelModal'
 import { setupFeedbackModal, showFeedbackModal } from './ui/FeedbackModal'
 import { openFileBrowser } from './ui/FileBrowser'
+import { themeManager } from './ui/ThemeManager'
 import { createSessionAPI, type SessionAPI } from './api'
 
 // ============================================================================
@@ -2786,6 +2787,9 @@ function setupSettingsModal(): void {
   // Setup keybind settings UI
   setupKeybindSettings()
   updateVoiceHint()
+
+  // Initialize theme manager
+  themeManager.init()
 
   // Initialize draw mode UI
   drawMode.init()

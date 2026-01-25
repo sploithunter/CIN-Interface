@@ -1,5 +1,6 @@
 /* Main CSS entry point - imports all style modules */
 
+@import './theme.css';
 @import './base.css';
 @import './sessions.css';
 @import './feed.css';
