@@ -1,0 +1,207 @@
+/* Theme CSS Variables - Light and Dark themes */
+
+:root {
+  /* Color scheme indicator for browser */
+  color-scheme: light dark;
+
+  /* === DARK THEME (default) === */
+
+  /* Base backgrounds */
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111;
+  --bg-tertiary: #1a1a1a;
+  --bg-elevated: rgba(0, 0, 0, 0.7);
+  --bg-overlay: rgba(0, 0, 0, 0.75);
+  --bg-modal-backdrop: rgba(0, 0, 0, 0.85);
+
+  /* Surface colors (for cards, panels) */
+  --surface-1: rgba(255, 255, 255, 0.02);
+  --surface-2: rgba(255, 255, 255, 0.03);
+  --surface-3: rgba(255, 255, 255, 0.05);
+  --surface-4: rgba(255, 255, 255, 0.06);
+  --surface-5: rgba(255, 255, 255, 0.08);
+  --surface-6: rgba(255, 255, 255, 0.1);
+  --surface-hover: rgba(255, 255, 255, 0.05);
+
+  /* Text colors */
+  --text-primary: #fff;
+  --text-secondary: rgba(255, 255, 255, 0.9);
+  --text-tertiary: rgba(255, 255, 255, 0.8);
+  --text-muted: rgba(255, 255, 255, 0.7);
+  --text-faint: rgba(255, 255, 255, 0.6);
+  --text-dim: rgba(255, 255, 255, 0.5);
+  --text-subtle: rgba(255, 255, 255, 0.4);
+  --text-ghost: rgba(255, 255, 255, 0.3);
+
+  /* Border colors */
+  --border-primary: rgba(255, 255, 255, 0.15);
+  --border-secondary: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-faint: rgba(255, 255, 255, 0.05);
+
+  /* Accent colors (kept consistent across themes for brand identity) */
+  --accent-primary: #a78bfa;
+  --accent-primary-rgb: 167, 139, 250;
+  --accent-secondary: #c4b5fd;
+
+  /* Status colors */
+  --color-success: #4ade80;
+  --color-success-rgb: 74, 222, 128;
+  --color-warning: #fbbf24;
+  --color-warning-rgb: 251, 191, 36;
+  --color-error: #f87171;
+  --color-error-rgb: 248, 113, 113;
+  --color-error-strong: #ef4444;
+  --color-info: #60a5fa;
+  --color-info-rgb: 96, 165, 250;
+  --color-working: #fbbf24;
+  --color-waiting: #fb923c;
+  --color-offline: #ef4444;
+  --color-cyan: #22d3ee;
+  --color-cyan-rgb: 34, 211, 238;
+
+  /* Code block colors */
+  --code-bg: rgba(0, 0, 0, 0.4);
+  --code-line-add: #4ade80;
+  --code-line-remove: #f87171;
+
+  /* Scrollbar colors */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  --scrollbar-track: transparent;
+
+  /* Shadow colors */
+  --shadow-color: rgba(0, 0, 0, 0.5);
+  --shadow-color-strong: rgba(0, 0, 0, 0.3);
+
+  /* Toast background */
+  --toast-bg: rgba(0, 0, 0, 0.9);
+
+  /* Input colors */
+  --input-bg: rgba(255, 255, 255, 0.08);
+  --input-border: rgba(255, 255, 255, 0.15);
+  --input-placeholder: rgba(255, 255, 255, 0.4);
+
+  /* Badge/button backgrounds */
+  --badge-bg: rgba(255, 255, 255, 0.1);
+
+  /* Kbd/key styling */
+  --kbd-bg: rgba(255, 255, 255, 0.1);
+  --kbd-border: rgba(255, 255, 255, 0.2);
+
+  /* 3D Scene colors (used by JS) */
+  --scene-bg: #080c14;
+  --scene-platform: #1a2535;
+  --scene-ambient: #606080;
+  --scene-sun: #fff5e6;
+
+  /* Gradient fade for collapsed content */
+  --fade-gradient: linear-gradient(transparent, rgba(26, 26, 26, 0.95));
+}
+
+/* === LIGHT THEME === */
+[data-theme="light"] {
+  /* Base backgrounds */
+  --bg-primary: #f8fafc;
+  --bg-secondary: #f1f5f9;
+  --bg-tertiary: #e2e8f0;
+  --bg-elevated: rgba(255, 255, 255, 0.95);
+  --bg-overlay: rgba(255, 255, 255, 0.9);
+  --bg-modal-backdrop: rgba(0, 0, 0, 0.5);
+
+  /* Surface colors (for cards, panels) */
+  --surface-1: rgba(0, 0, 0, 0.02);
+  --surface-2: rgba(0, 0, 0, 0.03);
+  --surface-3: rgba(0, 0, 0, 0.04);
+  --surface-4: rgba(0, 0, 0, 0.05);
+  --surface-5: rgba(0, 0, 0, 0.06);
+  --surface-6: rgba(0, 0, 0, 0.08);
+  --surface-hover: rgba(0, 0, 0, 0.05);
+
+  /* Text colors */
+  --text-primary: #1e293b;
+  --text-secondary: #334155;
+  --text-tertiary: #475569;
+  --text-muted: #64748b;
+  --text-faint: #64748b;
+  --text-dim: #94a3b8;
+  --text-subtle: #94a3b8;
+  --text-ghost: #cbd5e1;
+
+  /* Border colors */
+  --border-primary: rgba(0, 0, 0, 0.15);
+  --border-secondary: rgba(0, 0, 0, 0.1);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-faint: rgba(0, 0, 0, 0.05);
+
+  /* Accent colors - slightly darker for light theme */
+  --accent-primary: #8b5cf6;
+  --accent-primary-rgb: 139, 92, 246;
+  --accent-secondary: #7c3aed;
+
+  /* Status colors - slightly adjusted for light background */
+  --color-success: #22c55e;
+  --color-success-rgb: 34, 197, 94;
+  --color-warning: #f59e0b;
+  --color-warning-rgb: 245, 158, 11;
+  --color-error: #ef4444;
+  --color-error-rgb: 239, 68, 68;
+  --color-error-strong: #dc2626;
+  --color-info: #3b82f6;
+  --color-info-rgb: 59, 130, 246;
+  --color-working: #f59e0b;
+  --color-waiting: #ea580c;
+  --color-offline: #dc2626;
+  --color-cyan: #0891b2;
+  --color-cyan-rgb: 8, 145, 178;
+
+  /* Code block colors */
+  --code-bg: rgba(0, 0, 0, 0.06);
+  --code-line-add: #22c55e;
+  --code-line-remove: #ef4444;
+
+  /* Scrollbar colors */
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
+  --scrollbar-track: transparent;
+
+  /* Shadow colors */
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --shadow-color-strong: rgba(0, 0, 0, 0.15);
+
+  /* Toast background */
+  --toast-bg: rgba(255, 255, 255, 0.98);
+
+  /* Input colors */
+  --input-bg: rgba(0, 0, 0, 0.04);
+  --input-border: rgba(0, 0, 0, 0.15);
+  --input-placeholder: rgba(0, 0, 0, 0.4);
+
+  /* Badge/button backgrounds */
+  --badge-bg: rgba(0, 0, 0, 0.08);
+
+  /* Kbd/key styling */
+  --kbd-bg: rgba(0, 0, 0, 0.06);
+  --kbd-border: rgba(0, 0, 0, 0.15);
+
+  /* 3D Scene colors (used by JS) */
+  --scene-bg: #e0e8f0;
+  --scene-platform: #c8d4e0;
+  --scene-ambient: #9090a0;
+  --scene-sun: #fff8f0;
+
+  /* Gradient fade for collapsed content */
+  --fade-gradient: linear-gradient(transparent, rgba(226, 232, 240, 0.95));
+}
+
+/* Smooth transition for theme changes */
+body,
+body * {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Disable transitions during theme switch to prevent flash */
+body.theme-transitioning,
+body.theme-transitioning * {
+  transition: none !important;
+}

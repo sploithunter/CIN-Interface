@@ -19,12 +19,53 @@ export class TimelineManager {
   private pendingIcons = new Map<string, HTMLElement>()
   private completedToolUses = new Set<string>()
 
+  // Navigation state
+  private currentNavEventId: string | null = null
+
   // Configuration
   private maxIcons = 50
 
   constructor() {
     this.timelineEl = document.getElementById('timeline')
     this.tooltipEl = document.getElementById('timeline-tooltip')
+  }
+
+  /**
+   * Highlight a specific timeline icon (for TAB navigation)
+   */
+  highlightEvent(eventId: string): void {
+    if (!this.timelineEl) return
+
+    // Remove previous highlight
+    if (this.currentNavEventId) {
+      const prevIcon = this.timelineEl.querySelector(`[data-event-id="${this.currentNavEventId}"]`) as HTMLElement
+      if (prevIcon) {
+        prevIcon.classList.remove('nav-highlight')
+      }
+    }
+
+    // Add new highlight
+    const icon = this.timelineEl.querySelector(`[data-event-id="${eventId}"]`) as HTMLElement
+    if (icon) {
+      icon.classList.add('nav-highlight')
+      this.currentNavEventId = eventId
+
+      // Scroll into view
+      icon.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    }
+  }
+
+  /**
+   * Clear navigation highlight
+   */
+  clearHighlight(): void {
+    if (!this.timelineEl || !this.currentNavEventId) return
+
+    const icon = this.timelineEl.querySelector(`[data-event-id="${this.currentNavEventId}"]`) as HTMLElement
+    if (icon) {
+      icon.classList.remove('nav-highlight')
+    }
+    this.currentNavEventId = null
   }
 
   /**
