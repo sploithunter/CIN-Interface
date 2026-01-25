@@ -295,6 +295,28 @@ class IssuePoller {
     console.log(`   ⏪ Rolling back ${issueKey}...`)
 
     try {
+      // Check for uncommitted changes and stash them first
+      try {
+        const statusOutput = execSync('git status --porcelain', {
+          cwd,
+          encoding: 'utf-8',
+          stdio: 'pipe',
+        }).trim()
+
+        if (statusOutput) {
+          console.log(`   ⚠️  Stashing uncommitted changes before rollback...`)
+          execSync('git stash push -m "auto-stash before rollback"', {
+            cwd,
+            encoding: 'utf-8',
+            timeout: 30000,
+            stdio: 'pipe',
+          })
+        }
+      } catch {
+        // Stash failed, try to continue anyway
+        console.log(`   ⚠️  Could not stash changes, attempting checkout anyway...`)
+      }
+
       // Switch back to original branch
       execSync(`git checkout ${originalBranch}`, {
         cwd,
