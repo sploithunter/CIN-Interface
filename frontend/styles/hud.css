@@ -248,6 +248,26 @@
   border: 2px solid rgba(var(--accent-primary-rgb), 0.5);
 }
 
+/* TAB navigation highlight */
+.timeline-icon.nav-highlight {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.6),
+              0 0 15px rgba(var(--accent-primary-rgb), 0.4);
+  z-index: 20;
+  animation: nav-pulse 1s ease-in-out infinite;
+}
+
+@keyframes nav-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.6),
+                0 0 15px rgba(var(--accent-primary-rgb), 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(var(--accent-primary-rgb), 0.8),
+                0 0 20px rgba(var(--accent-primary-rgb), 0.6);
+  }
+}
+
 #timeline-tooltip {
   position: fixed;
   background: var(--toast-bg);

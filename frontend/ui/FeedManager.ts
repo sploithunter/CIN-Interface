@@ -14,12 +14,18 @@ import type { ClaudeEvent, PreToolUseEvent, PostToolUseEvent, AgentType } from '
 export class FeedManager {
   private feedEl: HTMLElement | null = null
   private scrollBtn: HTMLElement | null = null
+  private missedEventsIndicator: HTMLElement | null = null
 
   // State tracking
   private eventIds = new Set<string>()
   private pendingItems = new Map<string, HTMLElement>()
   private completedData = new Map<string, { success: boolean; duration?: number; response?: Record<string, unknown> }>()
   private activeFilter: string | null = null
+
+  // Missed events tracking
+  private missedEventsCount = 0
+  private recentEvents: { id: string; type: string; tool?: string; timestamp: number }[] = []
+  private readonly MAX_RECENT_EVENTS = 50
 
   // Working directory for shortening paths
   private cwd: string = ''
@@ -35,6 +41,73 @@ export class FeedManager {
   constructor() {
     this.feedEl = document.getElementById('activity-feed')
     this.scrollBtn = document.getElementById('feed-scroll-bottom')
+    this.createMissedEventsIndicator()
+  }
+
+  /**
+   * Create the missed events indicator element
+   */
+  private createMissedEventsIndicator(): void {
+    const wrapper = document.getElementById('activity-feed-wrapper')
+    if (!wrapper) return
+
+    this.missedEventsIndicator = document.createElement('div')
+    this.missedEventsIndicator.id = 'missed-events-indicator'
+    this.missedEventsIndicator.className = 'missed-events-indicator'
+    this.missedEventsIndicator.innerHTML = `
+      <span class="missed-events-icon">⬆</span>
+      <span class="missed-events-count">0</span>
+      <span class="missed-events-label">new events</span>
+      <span class="missed-events-hint">Press <kbd>Tab</kbd> to navigate</span>
+    `
+    this.missedEventsIndicator.addEventListener('click', () => this.scrollToBottom())
+    wrapper.insertBefore(this.missedEventsIndicator, wrapper.firstChild)
+  }
+
+  /**
+   * Update the missed events indicator visibility and count
+   */
+  private updateMissedEventsIndicator(): void {
+    if (!this.missedEventsIndicator) return
+
+    if (this.missedEventsCount > 0 && !this.isNearBottom()) {
+      this.missedEventsIndicator.classList.add('visible')
+      const countEl = this.missedEventsIndicator.querySelector('.missed-events-count')
+      const labelEl = this.missedEventsIndicator.querySelector('.missed-events-label')
+      if (countEl) countEl.textContent = String(this.missedEventsCount)
+      if (labelEl) labelEl.textContent = this.missedEventsCount === 1 ? 'new event' : 'new events'
+    } else {
+      this.missedEventsIndicator.classList.remove('visible')
+      this.missedEventsCount = 0
+    }
+  }
+
+  /**
+   * Get recent events for navigation
+   */
+  getRecentEvents(): { id: string; type: string; tool?: string; timestamp: number }[] {
+    return [...this.recentEvents]
+  }
+
+  /**
+   * Navigate to a specific event by ID
+   */
+  navigateToEvent(eventId: string): boolean {
+    if (!this.feedEl) return false
+
+    const feedItem = this.feedEl.querySelector(`[data-event-id="${eventId}"]`) as HTMLElement
+    if (feedItem) {
+      feedItem.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+      // Highlight the item briefly
+      feedItem.classList.add('event-highlight')
+      setTimeout(() => {
+        feedItem.classList.remove('event-highlight')
+      }, 2000)
+
+      return true
+    }
+    return false
   }
 
   /**
@@ -64,7 +137,14 @@ export class FeedManager {
     if (!this.feedEl || !this.scrollBtn) return
 
     // Update button visibility on scroll
-    this.feedEl.addEventListener('scroll', () => this.updateScrollButton())
+    this.feedEl.addEventListener('scroll', () => {
+      this.updateScrollButton()
+      // Clear missed events when user scrolls to bottom
+      if (this.isNearBottom()) {
+        this.missedEventsCount = 0
+        this.updateMissedEventsIndicator()
+      }
+    })
 
     // Click to scroll to bottom
     this.scrollBtn.addEventListener('click', () => this.scrollToBottom())
@@ -98,6 +178,9 @@ export class FeedManager {
     requestAnimationFrame(() => {
       if (this.feedEl) {
         this.feedEl.scrollTop = this.feedEl.scrollHeight
+        // Clear missed events when scrolling to bottom
+        this.missedEventsCount = 0
+        this.updateMissedEventsIndicator()
       }
     })
   }
@@ -441,8 +524,24 @@ export class FeedManager {
 
     // Check scroll position BEFORE adding item (so isNearBottom is accurate)
     const shouldScroll = event.type === 'user_prompt_submit' || this.isNearBottom()
+    const wasNearBottom = this.isNearBottom()
 
     this.feedEl.appendChild(item)
+
+    // Track recent events for TAB navigation
+    const toolName = event.type === 'pre_tool_use' ? (event as PreToolUseEvent).tool :
+                     event.type === 'post_tool_use' ? (event as PostToolUseEvent).tool :
+                     undefined
+    this.recentEvents.push({
+      id: event.id,
+      type: event.type,
+      tool: toolName,
+      timestamp: event.timestamp
+    })
+    // Keep only the most recent events
+    if (this.recentEvents.length > this.MAX_RECENT_EVENTS) {
+      this.recentEvents.shift()
+    }
 
     // Apply active filter - hide item if it doesn't match
     if (this.activeFilter !== null && event.sessionId !== this.activeFilter) {
@@ -454,6 +553,10 @@ export class FeedManager {
           this.feedEl.scrollTop = this.feedEl.scrollHeight
         }
       })
+    } else if (!wasNearBottom) {
+      // User is scrolled up - track this as a missed event
+      this.missedEventsCount++
+      this.updateMissedEventsIndicator()
     }
 
     // Update scroll button visibility

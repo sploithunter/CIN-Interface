@@ -163,6 +163,7 @@ interface AppState {
   historyIndex: number  // Current position in history (-1 = not navigating)
   historyDraft: string  // Saved draft when navigating history
   pendingImages: PendingImage[]  // Images attached to the current prompt
+  eventNavIndex: number  // Current index for TAB navigation through events (-1 = not navigating)
 }
 
 const state: AppState = {
@@ -186,6 +187,7 @@ const state: AppState = {
   historyIndex: -1,
   historyDraft: '',
   pendingImages: [],
+  eventNavIndex: -1,
 }
 
 // Expose for console testing (can remove in production)
@@ -3436,6 +3438,67 @@ function init() {
   // Fetch server info (cwd, etc.)
   fetchServerInfo()
 
+  // Event navigation functions for TAB key handling
+  function navigateToPreviousEvent(): void {
+    if (!state.feedManager) return
+    const events = state.feedManager.getRecentEvents()
+    if (events.length === 0) {
+      toast.info('No events to navigate', { icon: '📭', duration: 1500 })
+      return
+    }
+
+    // If not navigating, start from the newest (end of array)
+    if (state.eventNavIndex === -1) {
+      state.eventNavIndex = events.length - 1
+    } else {
+      // Go to older event (lower index)
+      state.eventNavIndex = Math.max(0, state.eventNavIndex - 1)
+    }
+
+    const event = events[state.eventNavIndex]
+    if (event) {
+      state.feedManager.navigateToEvent(event.id)
+      // Also highlight in timeline
+      state.timelineManager?.highlightEvent(event.id)
+      const toolInfo = event.tool ? ` (${event.tool})` : ''
+      toast.info(`Event ${state.eventNavIndex + 1}/${events.length}: ${event.type}${toolInfo}`, {
+        icon: '⬆',
+        duration: 1500,
+        html: true,
+      })
+    }
+  }
+
+  function navigateToNextEvent(): void {
+    if (!state.feedManager) return
+    const events = state.feedManager.getRecentEvents()
+    if (events.length === 0) {
+      toast.info('No events to navigate', { icon: '📭', duration: 1500 })
+      return
+    }
+
+    // If not navigating, start from the oldest (beginning of array)
+    if (state.eventNavIndex === -1) {
+      state.eventNavIndex = 0
+    } else {
+      // Go to newer event (higher index)
+      state.eventNavIndex = Math.min(events.length - 1, state.eventNavIndex + 1)
+    }
+
+    const event = events[state.eventNavIndex]
+    if (event) {
+      state.feedManager.navigateToEvent(event.id)
+      // Also highlight in timeline
+      state.timelineManager?.highlightEvent(event.id)
+      const toolInfo = event.tool ? ` (${event.tool})` : ''
+      toast.info(`Event ${state.eventNavIndex + 1}/${events.length}: ${event.type}${toolInfo}`, {
+        icon: '⬇',
+        duration: 1500,
+        html: true,
+      })
+    }
+  }
+
   // Setup keyboard shortcuts
   setupKeyboardShortcuts({
     getScene: () => state.scene,
@@ -3451,6 +3514,8 @@ function init() {
     onUpdateAttentionBadge: updateAttentionBadge,
     onSetUserChangedCamera: (value) => { state.userChangedCamera = value },
     onInterruptSession: interruptSession,
+    onNavigateToPreviousEvent: navigateToPreviousEvent,
+    onNavigateToNextEvent: navigateToNextEvent,
   })
 
   // Setup click-to-prompt and context menu

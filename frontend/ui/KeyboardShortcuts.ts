@@ -79,6 +79,10 @@ export interface KeyboardShortcutContext {
   onUpdateAttentionBadge: () => void
   onSetUserChangedCamera: (value: boolean) => void
   onInterruptSession: (sessionName: string) => void
+
+  /** Event navigation for TAB key */
+  onNavigateToPreviousEvent: () => void
+  onNavigateToNextEvent: () => void
 }
 
 // ============================================================================
@@ -118,6 +122,28 @@ export function setupKeyboardShortcuts(ctx: KeyboardShortcutContext): void {
 
       // No active working session - let it pass through (browser may still use it)
       return
+    }
+
+    // ========================================================================
+    // TAB KEY - Event navigation or focus toggle
+    // ========================================================================
+    // Shift+Tab: Navigate to previous event (older)
+    // Alt+Tab (in activity feed): Navigate to next event (newer)
+    // Tab alone: Focus toggle between prompt input and 3D scene
+    if (e.key === 'Tab') {
+      // Shift+Tab: Navigate to previous (older) event
+      if (e.shiftKey && !e.altKey && !e.ctrlKey) {
+        e.preventDefault()
+        ctx.onNavigateToPreviousEvent()
+        return
+      }
+
+      // Alt+Tab: Navigate to next (newer) event (only when focused on activity)
+      if (e.altKey && !e.shiftKey && !e.ctrlKey) {
+        e.preventDefault()
+        ctx.onNavigateToNextEvent()
+        return
+      }
     }
 
     // Focus toggle (Tab/Escape by default, user-configurable)
