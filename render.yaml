@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: cin-interface
+    env: docker
+    dockerfilePath: ./Dockerfile
+    region: oregon
+    plan: standard
+    numInstances: 1
+    
+    # Environment
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: HOST
+        value: "0.0.0.0"
+    
+    # Health check
+    healthCheckPath: /health
+    healthCheckInterval: 30
+    
+    # Build
+    buildCommand: npm run build
+    startCommand: npm start
+    
+    # Scaling
+    autoDeploy: true
+    maxInstances: 3
+    
+    # Disk
+    disk:
+      name: cin-data
+      mountPath: /app/data
+      sizeGB: 1
