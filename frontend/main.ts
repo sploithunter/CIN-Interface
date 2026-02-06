@@ -62,7 +62,7 @@ import { setupTextLabelModal, showTextLabelModal } from './ui/TextLabelModal'
 import { setupFeedbackModal, showFeedbackModal } from './ui/FeedbackModal'
 import { openFileBrowser } from './ui/FileBrowser'
 import { themeManager } from './ui/ThemeManager'
-import { createSessionAPI, type SessionAPI } from './api'
+import { createSessionAPI, type SessionAPI } from './services'
 
 // ============================================================================
 // Configuration
