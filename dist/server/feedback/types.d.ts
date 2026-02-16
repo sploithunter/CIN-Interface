@@ -1,6 +1,8 @@
 /**
  * Feedback system types for CIN-Interface
  */
+import type { FixerStatus } from '../../shared/feedbackConfig.js';
+export type { FixerStatus };
 export type FeedbackType = 'bug' | 'improve' | 'works';
 export interface Feedback {
     id: string;
@@ -16,10 +18,14 @@ export interface Feedback {
     viewportHeight: number;
     userAgent: string;
     screenshotPath?: string;
+    screenshotUrl?: string;
     processed: boolean;
     githubIssueNumber?: number;
     githubIssueUrl?: string;
     groupedWith?: string;
+    fixerStatus?: FixerStatus;
+    fixerMessage?: string;
+    validationOutput?: string;
     createdAt: number;
     updatedAt: number;
 }
@@ -41,6 +47,10 @@ export interface UpdateFeedbackInput {
     githubIssueNumber?: number;
     githubIssueUrl?: string;
     groupedWith?: string;
+    fixerStatus?: FixerStatus;
+    fixerMessage?: string;
+    validationOutput?: string;
+    screenshotUrl?: string;
 }
 export interface FeedbackFilter {
     type?: FeedbackType;

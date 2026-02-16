@@ -112,6 +112,7 @@ export type CINEventType =
   | 'user_prompt_submit'
   | 'notification'
   | 'pre_compact'
+  | 'assistant_message'
   | 'unknown';
 
 /** Union of all CIN event types (bridge events + CIN-specific) */
@@ -124,6 +125,7 @@ export type CINEvent =
   | import('coding-agent-bridge').SessionEndEvent
   | import('coding-agent-bridge').UserPromptSubmitEvent
   | import('coding-agent-bridge').NotificationEvent
+  | import('coding-agent-bridge').AssistantMessageEvent
   | PreCompactEvent
   | UnknownEvent;
 

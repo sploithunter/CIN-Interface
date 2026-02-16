@@ -21,6 +21,7 @@ export type HookEventType =
   | 'user_prompt_submit'
   | 'notification'
   | 'pre_compact'
+  | 'assistant_message'
 
 export type ToolName =
   | 'Read'
@@ -97,6 +98,8 @@ export interface SubagentStopEvent extends BaseEvent {
 export interface SessionStartEvent extends BaseEvent {
   type: 'session_start'
   source: 'startup' | 'resume' | 'clear' | 'compact'
+  /** Path to the transcript JSONL file (provided by Claude Code hooks) */
+  transcript_path?: string
 }
 
 export interface SessionEndEvent extends BaseEvent {
@@ -130,6 +133,30 @@ export interface PreCompactEvent extends BaseEvent {
 }
 
 // ============================================================================
+// Transcript / Assistant Message Types
+// ============================================================================
+
+/** A content block from an assistant message (parsed from transcript) */
+export interface ContentBlock {
+  type: 'text' | 'thinking' | 'tool_use'
+  text?: string
+  toolName?: string
+  toolInput?: Record<string, unknown>
+  toolUseId?: string
+}
+
+/** Assistant message event extracted from transcript JSONL */
+export interface AssistantMessageEvent extends BaseEvent {
+  type: 'assistant_message'
+  /** Content blocks (text, thinking, tool_use) */
+  content: ContentBlock[]
+  /** API request ID for grouping blocks from the same response */
+  requestId?: string
+  /** Whether this is a preamble message (whitespace-only text before tools) */
+  isPreamble: boolean
+}
+
+// ============================================================================
 // Union Type
 // ============================================================================
 
@@ -143,6 +170,7 @@ export type ClaudeEvent =
   | UserPromptSubmitEvent
   | NotificationEvent
   | PreCompactEvent
+  | AssistantMessageEvent
 
 // ============================================================================
 // WebSocket Messages

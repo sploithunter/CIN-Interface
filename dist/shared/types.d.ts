@@ -31,9 +31,9 @@ export interface UnknownEvent extends CINBaseEvent {
     raw: Record<string, unknown>;
 }
 /** Extended event type including CIN-specific events */
-export type CINEventType = 'pre_tool_use' | 'post_tool_use' | 'stop' | 'subagent_stop' | 'session_start' | 'session_end' | 'user_prompt_submit' | 'notification' | 'pre_compact' | 'unknown';
+export type CINEventType = 'pre_tool_use' | 'post_tool_use' | 'stop' | 'subagent_stop' | 'session_start' | 'session_end' | 'user_prompt_submit' | 'notification' | 'pre_compact' | 'assistant_message' | 'unknown';
 /** Union of all CIN event types (bridge events + CIN-specific) */
-export type CINEvent = import('coding-agent-bridge').PreToolUseEvent | import('coding-agent-bridge').PostToolUseEvent | import('coding-agent-bridge').StopEvent | import('coding-agent-bridge').SubagentStopEvent | import('coding-agent-bridge').SessionStartEvent | import('coding-agent-bridge').SessionEndEvent | import('coding-agent-bridge').UserPromptSubmitEvent | import('coding-agent-bridge').NotificationEvent | PreCompactEvent | UnknownEvent;
+export type CINEvent = import('coding-agent-bridge').PreToolUseEvent | import('coding-agent-bridge').PostToolUseEvent | import('coding-agent-bridge').StopEvent | import('coding-agent-bridge').SubagentStopEvent | import('coding-agent-bridge').SessionStartEvent | import('coding-agent-bridge').SessionEndEvent | import('coding-agent-bridge').UserPromptSubmitEvent | import('coding-agent-bridge').NotificationEvent | import('coding-agent-bridge').AssistantMessageEvent | PreCompactEvent | UnknownEvent;
 export interface ZonePosition {
     q: number;
     r: number;

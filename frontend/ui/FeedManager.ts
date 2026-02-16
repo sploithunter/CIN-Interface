@@ -9,7 +9,7 @@
  */
 
 import { getToolIcon } from '../utils/ToolUtils'
-import type { ClaudeEvent, PreToolUseEvent, PostToolUseEvent, AgentType } from '../../shared/types'
+import type { ClaudeEvent, PreToolUseEvent, PostToolUseEvent, AssistantMessageEvent, ContentBlock, AgentType } from '../../shared/types'
 
 export class FeedManager {
   private feedEl: HTMLElement | null = null
@@ -518,6 +518,62 @@ export class FeedManager {
         break
       }
 
+      case 'assistant_message': {
+        const msgEvent = event as AssistantMessageEvent
+        const blocks = msgEvent.content || []
+
+        // Skip preamble messages (whitespace-only text before tool calls)
+        if (msgEvent.isPreamble) return
+
+        // Filter to text and thinking blocks (tool_use blocks are shown via pre_tool_use events)
+        const textBlocks = blocks.filter((b: ContentBlock) => b.type === 'text' && b.text?.trim())
+        const thinkBlocks = blocks.filter((b: ContentBlock) => b.type === 'thinking' && b.text?.trim())
+
+        if (textBlocks.length === 0 && thinkBlocks.length === 0) return
+
+        const agentName = agent === 'codex' ? 'Codex' : 'Claude'
+        item.classList.add('assistant-response')
+
+        let contentHtml = ''
+
+        // Render thinking blocks as expandable
+        for (const block of thinkBlocks) {
+          const thinkText = block.text || ''
+          const preview = thinkText.substring(0, 100).replace(/\n/g, ' ')
+          contentHtml += `<details class="thinking-block"><summary>Thinking: ${escapeHtml(preview)}...</summary><div class="thinking-content">${renderMarkdown(thinkText)}</div></details>`
+        }
+
+        // Render text blocks
+        for (const block of textBlocks) {
+          const text = block.text || ''
+          const isLong = text.length > 2000
+          const displayText = isLong ? text.slice(0, 2000) : text
+          contentHtml += `<div class="assistant-text">${renderMarkdown(displayText)}${isLong ? '<span class="show-more">... [show more]</span>' : ''}</div>`
+        }
+
+        item.innerHTML = `
+          <div class="feed-item-header">
+            <div class="feed-item-icon">💬</div>
+            <div class="feed-item-title">${agentName}</div>
+            <div class="feed-item-time">${new Date(event.timestamp).toLocaleTimeString()}</div>
+          </div>
+          <div class="feed-item-content">${contentHtml}</div>
+        `
+
+        // Add click handlers for "show more" spans
+        item.querySelectorAll('.show-more').forEach((el) => {
+          el.addEventListener('click', () => {
+            const textEl = el.parentElement
+            if (textEl) {
+              const blockIndex = Array.from(item.querySelectorAll('.assistant-text')).indexOf(textEl)
+              const fullText = textBlocks[blockIndex]?.text || ''
+              textEl.innerHTML = renderMarkdown(fullText)
+            }
+          })
+        })
+        break
+      }
+
       default:
         return // Don't add unknown events to feed
     }
@@ -580,18 +636,24 @@ export class FeedManager {
    * Create HTML for tool response preview
    */
   private createResponsePreview(tool: string, success: boolean, response: Record<string, unknown>): string {
-    if (tool === 'Bash' && response.output) {
-      const output = String(response.output).slice(0, 300)
+    if (tool === 'Bash' && (response.stdout || response.output)) {
+      const output = String(response.stdout || response.output).slice(0, 300)
       if (output.trim()) {
         return `<div class="feed-item-response"><div class="feed-item-code">${escapeHtml(output)}</div></div>`
       }
-    } else if ((tool === 'Grep' || tool === 'Glob') && response.result) {
-      const lines = String(response.result).split('\n').slice(0, 5).join('\n')
+    } else if (tool === 'Read' && (response.content || response.output)) {
+      const content = String(response.content || response.output).slice(0, 300)
+      if (content.trim()) {
+        const lines = content.split('\n').slice(0, 8).join('\n')
+        return `<div class="feed-item-response"><div class="feed-item-code">${escapeHtml(lines)}</div></div>`
+      }
+    } else if ((tool === 'Grep' || tool === 'Glob') && (response.result || response.output)) {
+      const lines = String(response.result || response.output).split('\n').slice(0, 5).join('\n')
       if (lines.trim()) {
         return `<div class="feed-item-response"><div class="feed-item-code">${escapeHtml(lines)}</div></div>`
       }
-    } else if (!success && response.error) {
-      return `<div class="feed-item-response error"><div class="feed-item-error">${escapeHtml(String(response.error).slice(0, 200))}</div></div>`
+    } else if (!success && (response.error || response.stderr)) {
+      return `<div class="feed-item-response error"><div class="feed-item-error">${escapeHtml(String(response.error || response.stderr).slice(0, 200))}</div></div>`
     }
     return ''
   }

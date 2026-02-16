@@ -54,8 +54,13 @@ import {
   createTmuxExecutor,
   EventProcessor,
   createEventProcessor,
+  TranscriptWatcher,
   ClaudeAdapter,
   CodexAdapter,
+} from 'coding-agent-bridge';
+import type {
+  AssistantMessageEvent as BridgeAssistantMessageEvent,
+  ContentBlock as BridgeContentBlock,
 } from 'coding-agent-bridge';
 import type {
   CINEvent,
@@ -256,6 +261,9 @@ async function sendToTmuxSafe(tmuxSession: string, text: string): Promise<void> 
 const events: CINEvent[] = [];
 const seenEventIds = new Set<string>();
 const pendingToolUses = new Map<string, PreToolUseEvent>();
+
+/** Transcript watchers keyed by agent session ID - watches transcript JSONL for assistant messages */
+const transcriptWatchers = new Map<string, TranscriptWatcher>();
 const clients = new Set<WebSocket>();
 let lastFileSize = 0;
 
@@ -346,6 +354,7 @@ function initBridgeEventFlow(): void {
         'session_end',
         'user_prompt_submit',
         'notification',
+        'assistant_message',
       ];
 
       if (parsed.type && validTypes.includes(parsed.type)) {
@@ -360,6 +369,9 @@ function initBridgeEventFlow(): void {
         };
         addEvent(event);
         debug(`[Bridge] New normalized event from file: ${event.type}`);
+
+        // Start transcript watcher if this event includes a transcript_path
+        maybeStartTranscriptWatcher(parsed.sessionId, parsed.transcript_path, event.sessionId);
       } else {
         // Raw hook event - use EventProcessor
         const processed = bridgeEventProcessor.processLine(line);
@@ -371,6 +383,9 @@ function initBridgeEventFlow(): void {
           event.cwd = processed.cwd || event.cwd || process.cwd();
           addEvent(event);
           debug(`[Bridge] New raw event from file: ${event.type}`);
+
+          // Start transcript watcher if this event includes a transcript_path
+          maybeStartTranscriptWatcher(processed.agentSessionId, processed.transcriptPath, event.sessionId);
         } else {
           debug(`[Bridge] EventProcessor returned null for: ${line.substring(0, 100)}`);
         }
@@ -442,6 +457,7 @@ async function startBridge(): Promise<void> {
  */
 async function stopBridge(): Promise<void> {
   log('[Bridge] Stopping bridge components...');
+  await stopAllTranscriptWatchers();
   await bridgeFileWatcher.stop();
   await cinSessionManager.stop();
   await bridgeSessionManager.stop();
@@ -763,6 +779,110 @@ function sendPermissionResponse(sessionId: string, optionNumber: string): boolea
     });
 
   return true;
+}
+
+// =============================================================================
+// Response Extraction (from tmux pane output)
+// =============================================================================
+
+/**
+ * Extract Claude's text response from tmux pane output.
+ *
+ * Claude Code renders responses in tmux with this structure:
+ *   ❯ <user prompt>
+ *   ⏺ <claude response text>
+ *     <continuation lines indented>
+ *   ────────── (separator)
+ *   ❯ <next prompt / suggestion>
+ *
+ * We extract the text from the last response block (after the last user prompt).
+ */
+function extractResponseFromTmuxPane(output: string): string | null {
+  const lines = output.split('\n');
+
+  // Find the last ⏺ marker (Claude's response start) scanning from bottom
+  let lastResponseStart = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim().startsWith('⏺')) {
+      lastResponseStart = i;
+      break;
+    }
+  }
+
+  if (lastResponseStart === -1) return null;
+
+  // Collect all response lines starting from the ⏺ marker
+  const responseLines: string[] = [];
+
+  for (let i = lastResponseStart; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // First line: extract text after ⏺ marker
+    if (i === lastResponseStart) {
+      responseLines.push(trimmed.replace(/^⏺\s*/, ''));
+      continue;
+    }
+
+    // Stop at separator lines (box drawing characters)
+    if (/^[─━]{4,}/.test(trimmed)) break;
+    // Stop at next user prompt
+    if (/^❯/.test(trimmed)) break;
+    // Stop at permission/status indicators
+    if (/^⏵⏵/.test(trimmed)) break;
+    // Stop at token/cost indicators at the bottom
+    if (/^\d+[,.]?\d*k?\s*tokens/i.test(trimmed)) break;
+    if (/^↓\s*\d/.test(trimmed)) break;
+
+    // Empty line within response = paragraph break
+    if (!trimmed) {
+      responseLines.push('');
+      continue;
+    }
+
+    // Continuation lines are indented with spaces
+    // Remove the leading indentation (typically 2 spaces for Claude's formatting)
+    const content = line.replace(/^  /, '');
+    responseLines.push(content);
+  }
+
+  if (responseLines.length === 0) return null;
+
+  // Clean up: trim trailing empty lines
+  while (responseLines.length > 0 && !responseLines[responseLines.length - 1].trim()) {
+    responseLines.pop();
+  }
+
+  const response = responseLines.join('\n').trim();
+  return response.length > 0 ? response : null;
+}
+
+/**
+ * Capture Claude's response text from the tmux pane of a managed session.
+ * Called when a stop event is received to populate the response field.
+ */
+async function captureStopResponse(managedSession: ManagedSession): Promise<string | null> {
+  try {
+    // For internal sessions, use the tmux session name
+    if (managedSession.tmuxSession) {
+      const stdout = await bridgeTmux.capturePane(managedSession.tmuxSession, { start: -500 });
+      return extractResponseFromTmuxPane(stdout);
+    }
+
+    // For external sessions with a known tmux pane
+    if (managedSession.terminal?.tmuxPane) {
+      const stdout = await bridgeTmux.capturePane(
+        managedSession.terminal.tmuxPane,
+        { start: -500, isPaneId: true, socket: managedSession.terminal.tmuxSocket }
+      );
+      return extractResponseFromTmuxPane(stdout);
+    }
+
+    return null;
+  } catch (error) {
+    debug(`Failed to capture stop response for ${managedSession.name}: ${error instanceof Error ? error.message : error}`);
+    return null;
+  }
 }
 
 // =============================================================================
@@ -1705,6 +1825,64 @@ function processEvent(event: CINEvent): CINEvent {
   return event;
 }
 
+/**
+ * Start a TranscriptWatcher for a session if we have a transcript path and haven't started one yet.
+ * The watcher tails the transcript JSONL file and emits assistant_message events.
+ */
+function maybeStartTranscriptWatcher(
+  agentSessionId: string,
+  transcriptPath: string | undefined | null,
+  managedSessionId: string
+): void {
+  if (!transcriptPath || !agentSessionId) return;
+  if (transcriptWatchers.has(agentSessionId)) return;
+
+  debug(`[Transcript] Starting watcher for ${agentSessionId.substring(0, 8)} -> ${transcriptPath}`);
+
+  const watcher = new TranscriptWatcher(transcriptPath, ClaudeAdapter, { debug: DEBUG });
+
+  watcher.on('message', (partial: Partial<BridgeAssistantMessageEvent>) => {
+    // Complete the partial event into a full CINEvent
+    const event: CINEvent = {
+      id: `transcript-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      type: 'assistant_message',
+      timestamp: Date.now(),
+      sessionId: agentSessionId,
+      cwd: '',
+      agent: 'claude',
+      content: partial.content || [],
+      requestId: partial.requestId,
+      isPreamble: partial.isPreamble ?? false,
+    } as CINEvent;
+
+    addEvent(event);
+  });
+
+  watcher.on('error', (err: Error) => {
+    debug(`[Transcript] Watcher error for ${agentSessionId.substring(0, 8)}: ${err.message}`);
+  });
+
+  watcher.start().catch((err: Error) => {
+    debug(`[Transcript] Failed to start watcher for ${agentSessionId.substring(0, 8)}: ${err.message}`);
+  });
+
+  transcriptWatchers.set(agentSessionId, watcher);
+}
+
+/** Stop all active transcript watchers (called during shutdown) */
+async function stopAllTranscriptWatchers(): Promise<void> {
+  const stops = Array.from(transcriptWatchers.entries()).map(async ([id, watcher]) => {
+    try {
+      await watcher.stop();
+      debug(`[Transcript] Stopped watcher for ${id.substring(0, 8)}`);
+    } catch {
+      // ignore
+    }
+  });
+  await Promise.all(stops);
+  transcriptWatchers.clear();
+}
+
 function addEvent(event: CINEvent): void {
   if (seenEventIds.has(event.id)) {
     debug(`Skipping duplicate event: ${event.id}`);
@@ -1781,6 +1959,23 @@ function addEvent(event: CINEvent): void {
   const updatedSession = cinSessionManager.getSession(managedSession.id);
   if (updatedSession && updatedSession.status !== prevStatus) {
     broadcastSessions();
+  }
+
+  // For stop events, try to capture Claude's response text from the tmux pane
+  // before broadcasting, so the frontend can display the response in the activity feed
+  if (event.type === 'stop' && (managedSession.tmuxSession || managedSession.terminal?.tmuxPane)) {
+    captureStopResponse(managedSession).then((response) => {
+      if (response) {
+        (processed as any).response = response;
+        debug(`Captured response for ${managedSession.name} (${response.length} chars)`);
+      }
+      // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
+      broadcast({ type: 'event', data: processed, payload: processed });
+    }).catch(() => {
+      // Broadcast even if capture fails
+      broadcast({ type: 'event', data: processed, payload: processed });
+    });
+    return;
   }
 
   // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
@@ -1993,6 +2188,7 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
         'session_end',
         'user_prompt_submit',
         'notification',
+        'assistant_message',
       ];
 
       if (parsed.type && validTypes.includes(parsed.type)) {
@@ -2007,6 +2203,9 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
         };
         addEvent(event);
         debug(`Received normalized event via HTTP: ${event.type}`);
+
+        // Start transcript watcher if this event includes a transcript_path
+        maybeStartTranscriptWatcher(parsed.sessionId, parsed.transcript_path, event.sessionId);
       } else {
         // Raw hook event - use EventProcessor
         const processed = bridgeEventProcessor.processLine(body);
@@ -2017,6 +2216,9 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse): Pro
           event.cwd = processed.cwd || event.cwd || process.cwd();
           addEvent(event);
           debug(`Received raw event via HTTP: ${event.type}`);
+
+          // Start transcript watcher if this event includes a transcript_path
+          maybeStartTranscriptWatcher(processed.agentSessionId, processed.transcriptPath, event.sessionId);
         } else {
           debug(`EventProcessor returned null for HTTP event: ${body.substring(0, 100)}`);
         }

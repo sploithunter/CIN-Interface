@@ -20,6 +20,7 @@ import { hostname } from 'os';
 import { randomUUID } from 'crypto';
 import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
 import { DEFAULTS } from '../shared/defaults.js';
+import { loadFeedbackConfig, DEFAULT_VALIDATION_CONFIG, } from '../shared/feedbackConfig.js';
 import { GitStatusManager } from './GitStatusManager.js';
 import { ProjectsManager } from './ProjectsManager.js';
 import { getCodexWatcher } from './CodexSessionWatcher.js';
@@ -27,7 +28,7 @@ import { createCINSessionManager } from './CINSessionManager.js';
 import { JSONFileFeedbackRepo } from './feedback/index.js';
 import { fileURLToPath } from 'url';
 // Bridge components
-import { createSessionManager, createFileWatcher, createTmuxExecutor, createEventProcessor, ClaudeAdapter, CodexAdapter, } from 'coding-agent-bridge';
+import { createSessionManager, createFileWatcher, createTmuxExecutor, createEventProcessor, TranscriptWatcher, ClaudeAdapter, CodexAdapter, } from 'coding-agent-bridge';
 // =============================================================================
 // Version (read from package.json)
 // =============================================================================
@@ -103,6 +104,9 @@ const EXEC_OPTIONS = { env: { ...process.env, PATH: EXEC_PATH } };
 const DEEPGRAM_API_KEY_ENV = 'DEEPGRAM_API_KEY';
 const DEEPGRAM_MODEL = 'nova-2';
 const DEEPGRAM_LANGUAGE = 'en';
+/** Feedback system configuration (loaded from env) */
+let feedbackConfig = loadFeedbackConfig();
+let validationConfig = { ...DEFAULT_VALIDATION_CONFIG };
 // =============================================================================
 // Security Helpers
 // =============================================================================
@@ -179,6 +183,8 @@ async function sendToTmuxSafe(tmuxSession, text) {
 const events = [];
 const seenEventIds = new Set();
 const pendingToolUses = new Map();
+/** Transcript watchers keyed by agent session ID - watches transcript JSONL for assistant messages */
+const transcriptWatchers = new Map();
 const clients = new Set();
 let lastFileSize = 0;
 const sessionTokens = new Map();
@@ -250,6 +256,7 @@ function initBridgeEventFlow() {
                 'session_end',
                 'user_prompt_submit',
                 'notification',
+                'assistant_message',
             ];
             if (parsed.type && validTypes.includes(parsed.type)) {
                 // Already normalized event - use directly
@@ -263,6 +270,8 @@ function initBridgeEventFlow() {
                 };
                 addEvent(event);
                 debug(`[Bridge] New normalized event from file: ${event.type}`);
+                // Start transcript watcher if this event includes a transcript_path
+                maybeStartTranscriptWatcher(parsed.sessionId, parsed.transcript_path, event.sessionId);
             }
             else {
                 // Raw hook event - use EventProcessor
@@ -275,6 +284,8 @@ function initBridgeEventFlow() {
                     event.cwd = processed.cwd || event.cwd || process.cwd();
                     addEvent(event);
                     debug(`[Bridge] New raw event from file: ${event.type}`);
+                    // Start transcript watcher if this event includes a transcript_path
+                    maybeStartTranscriptWatcher(processed.agentSessionId, processed.transcriptPath, event.sessionId);
                 }
                 else {
                     debug(`[Bridge] EventProcessor returned null for: ${line.substring(0, 100)}`);
@@ -336,6 +347,7 @@ async function startBridge() {
  */
 async function stopBridge() {
     log('[Bridge] Stopping bridge components...');
+    await stopAllTranscriptWatchers();
     await bridgeFileWatcher.stop();
     await cinSessionManager.stop();
     await bridgeSessionManager.stop();
@@ -621,6 +633,99 @@ function sendPermissionResponse(sessionId, optionNumber) {
         log(`Failed to send permission response: ${error.message}`);
     });
     return true;
+}
+// =============================================================================
+// Response Extraction (from tmux pane output)
+// =============================================================================
+/**
+ * Extract Claude's text response from tmux pane output.
+ *
+ * Claude Code renders responses in tmux with this structure:
+ *   ❯ <user prompt>
+ *   ⏺ <claude response text>
+ *     <continuation lines indented>
+ *   ────────── (separator)
+ *   ❯ <next prompt / suggestion>
+ *
+ * We extract the text from the last response block (after the last user prompt).
+ */
+function extractResponseFromTmuxPane(output) {
+    const lines = output.split('\n');
+    // Find the last ⏺ marker (Claude's response start) scanning from bottom
+    let lastResponseStart = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trim().startsWith('⏺')) {
+            lastResponseStart = i;
+            break;
+        }
+    }
+    if (lastResponseStart === -1)
+        return null;
+    // Collect all response lines starting from the ⏺ marker
+    const responseLines = [];
+    for (let i = lastResponseStart; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        // First line: extract text after ⏺ marker
+        if (i === lastResponseStart) {
+            responseLines.push(trimmed.replace(/^⏺\s*/, ''));
+            continue;
+        }
+        // Stop at separator lines (box drawing characters)
+        if (/^[─━]{4,}/.test(trimmed))
+            break;
+        // Stop at next user prompt
+        if (/^❯/.test(trimmed))
+            break;
+        // Stop at permission/status indicators
+        if (/^⏵⏵/.test(trimmed))
+            break;
+        // Stop at token/cost indicators at the bottom
+        if (/^\d+[,.]?\d*k?\s*tokens/i.test(trimmed))
+            break;
+        if (/^↓\s*\d/.test(trimmed))
+            break;
+        // Empty line within response = paragraph break
+        if (!trimmed) {
+            responseLines.push('');
+            continue;
+        }
+        // Continuation lines are indented with spaces
+        // Remove the leading indentation (typically 2 spaces for Claude's formatting)
+        const content = line.replace(/^  /, '');
+        responseLines.push(content);
+    }
+    if (responseLines.length === 0)
+        return null;
+    // Clean up: trim trailing empty lines
+    while (responseLines.length > 0 && !responseLines[responseLines.length - 1].trim()) {
+        responseLines.pop();
+    }
+    const response = responseLines.join('\n').trim();
+    return response.length > 0 ? response : null;
+}
+/**
+ * Capture Claude's response text from the tmux pane of a managed session.
+ * Called when a stop event is received to populate the response field.
+ */
+async function captureStopResponse(managedSession) {
+    try {
+        // For internal sessions, use the tmux session name
+        if (managedSession.tmuxSession) {
+            const stdout = await bridgeTmux.capturePane(managedSession.tmuxSession, { start: -500 });
+            return extractResponseFromTmuxPane(stdout);
+        }
+        // For external sessions with a known tmux pane
+        if (managedSession.terminal?.tmuxPane) {
+            const stdout = await bridgeTmux.capturePane(managedSession.terminal.tmuxPane, { start: -500, isPaneId: true, socket: managedSession.terminal.tmuxSocket });
+            return extractResponseFromTmuxPane(stdout);
+        }
+        return null;
+    }
+    catch (error) {
+        debug(`Failed to capture stop response for ${managedSession.name}: ${error instanceof Error ? error.message : error}`);
+        return null;
+    }
 }
 // =============================================================================
 // Suggestion Extraction (Claude's suggested next prompt)
@@ -1427,6 +1532,54 @@ function processEvent(event) {
     }
     return event;
 }
+/**
+ * Start a TranscriptWatcher for a session if we have a transcript path and haven't started one yet.
+ * The watcher tails the transcript JSONL file and emits assistant_message events.
+ */
+function maybeStartTranscriptWatcher(agentSessionId, transcriptPath, managedSessionId) {
+    if (!transcriptPath || !agentSessionId)
+        return;
+    if (transcriptWatchers.has(agentSessionId))
+        return;
+    debug(`[Transcript] Starting watcher for ${agentSessionId.substring(0, 8)} -> ${transcriptPath}`);
+    const watcher = new TranscriptWatcher(transcriptPath, ClaudeAdapter, { debug: DEBUG });
+    watcher.on('message', (partial) => {
+        // Complete the partial event into a full CINEvent
+        const event = {
+            id: `transcript-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            type: 'assistant_message',
+            timestamp: Date.now(),
+            sessionId: agentSessionId,
+            cwd: '',
+            agent: 'claude',
+            content: partial.content || [],
+            requestId: partial.requestId,
+            isPreamble: partial.isPreamble ?? false,
+        };
+        addEvent(event);
+    });
+    watcher.on('error', (err) => {
+        debug(`[Transcript] Watcher error for ${agentSessionId.substring(0, 8)}: ${err.message}`);
+    });
+    watcher.start().catch((err) => {
+        debug(`[Transcript] Failed to start watcher for ${agentSessionId.substring(0, 8)}: ${err.message}`);
+    });
+    transcriptWatchers.set(agentSessionId, watcher);
+}
+/** Stop all active transcript watchers (called during shutdown) */
+async function stopAllTranscriptWatchers() {
+    const stops = Array.from(transcriptWatchers.entries()).map(async ([id, watcher]) => {
+        try {
+            await watcher.stop();
+            debug(`[Transcript] Stopped watcher for ${id.substring(0, 8)}`);
+        }
+        catch {
+            // ignore
+        }
+    });
+    await Promise.all(stops);
+    transcriptWatchers.clear();
+}
 function addEvent(event) {
     if (seenEventIds.has(event.id)) {
         debug(`Skipping duplicate event: ${event.id}`);
@@ -1492,6 +1645,22 @@ function addEvent(event) {
     const updatedSession = cinSessionManager.getSession(managedSession.id);
     if (updatedSession && updatedSession.status !== prevStatus) {
         broadcastSessions();
+    }
+    // For stop events, try to capture Claude's response text from the tmux pane
+    // before broadcasting, so the frontend can display the response in the activity feed
+    if (event.type === 'stop' && (managedSession.tmuxSession || managedSession.terminal?.tmuxPane)) {
+        captureStopResponse(managedSession).then((response) => {
+            if (response) {
+                processed.response = response;
+                debug(`Captured response for ${managedSession.name} (${response.length} chars)`);
+            }
+            // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
+            broadcast({ type: 'event', data: processed, payload: processed });
+        }).catch(() => {
+            // Broadcast even if capture fails
+            broadcast({ type: 'event', data: processed, payload: processed });
+        });
+        return;
     }
     // Use 'data' per WEBSOCKET_INTERFACE.md spec, keep 'payload' for backward compatibility
     broadcast({ type: 'event', data: processed, payload: processed });
@@ -1675,6 +1844,7 @@ async function handleHttpRequest(req, res) {
                 'session_end',
                 'user_prompt_submit',
                 'notification',
+                'assistant_message',
             ];
             if (parsed.type && validTypes.includes(parsed.type)) {
                 // Already normalized event - use directly
@@ -1688,6 +1858,8 @@ async function handleHttpRequest(req, res) {
                 };
                 addEvent(event);
                 debug(`Received normalized event via HTTP: ${event.type}`);
+                // Start transcript watcher if this event includes a transcript_path
+                maybeStartTranscriptWatcher(parsed.sessionId, parsed.transcript_path, event.sessionId);
             }
             else {
                 // Raw hook event - use EventProcessor
@@ -1699,6 +1871,8 @@ async function handleHttpRequest(req, res) {
                     event.cwd = processed.cwd || event.cwd || process.cwd();
                     addEvent(event);
                     debug(`Received raw event via HTTP: ${event.type}`);
+                    // Start transcript watcher if this event includes a transcript_path
+                    maybeStartTranscriptWatcher(processed.agentSessionId, processed.transcriptPath, event.sessionId);
                 }
                 else {
                     debug(`EventProcessor returned null for HTTP event: ${body.substring(0, 100)}`);
@@ -2479,6 +2653,58 @@ async function handleHttpRequest(req, res) {
     // =============================================================================
     // Feedback Endpoints
     // =============================================================================
+    // GET /feedback/config - Get feedback system configuration
+    if (req.method === 'GET' && req.url === '/feedback/config') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, config: feedbackConfig }));
+        return;
+    }
+    // PATCH /feedback/config - Update feedback system configuration
+    if (req.method === 'PATCH' && req.url === '/feedback/config') {
+        try {
+            const body = await collectRequestBody(req);
+            const changes = JSON.parse(body);
+            // Merge changes into config
+            feedbackConfig = { ...feedbackConfig, ...changes };
+            log(`Updated feedback config: enabled=${feedbackConfig.enabled}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, config: feedbackConfig }));
+        }
+        catch (e) {
+            console.error('Failed to update feedback config:', e);
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Invalid request body' }));
+        }
+        return;
+    }
+    // GET /feedback/validation/config - Get validation configuration
+    if (req.method === 'GET' && req.url === '/feedback/validation/config') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, config: validationConfig }));
+        return;
+    }
+    // PATCH /feedback/validation/config - Update validation configuration
+    if (req.method === 'PATCH' && req.url === '/feedback/validation/config') {
+        try {
+            const body = await collectRequestBody(req);
+            const changes = JSON.parse(body);
+            // Merge changes into config, handling nested 'skip' object
+            if (changes.skip) {
+                validationConfig.skip = { ...validationConfig.skip, ...changes.skip };
+                delete changes.skip;
+            }
+            validationConfig = { ...validationConfig, ...changes };
+            log(`Updated validation config: enabled=${validationConfig.enabled}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, config: validationConfig }));
+        }
+        catch (e) {
+            console.error('Failed to update validation config:', e);
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Invalid request body' }));
+        }
+        return;
+    }
     // POST /feedback - Create new feedback
     if (req.method === 'POST' && req.url === '/feedback') {
         try {
@@ -2505,11 +2731,45 @@ async function handleHttpRequest(req, res) {
     if (req.method === 'GET' && req.url?.startsWith('/feedback')) {
         // Parse query params for filtering
         const urlObj = new URL(req.url, `http://localhost:${PORT}`);
+        // Check for /feedback/config - handled earlier with exact match
+        if (urlObj.pathname === '/feedback/config') {
+            // Already handled above
+            return;
+        }
+        // Check for /feedback/validation/config - handled earlier with exact match
+        if (urlObj.pathname === '/feedback/validation/config') {
+            // Already handled above
+            return;
+        }
         // Check for /feedback/unprocessed
         if (urlObj.pathname === '/feedback/unprocessed') {
             const feedback = await feedbackRepo.getUnprocessed();
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true, feedback }));
+            return;
+        }
+        // Check for /feedback/:id/status (get feedback status for polling)
+        const feedbackStatusMatch = urlObj.pathname.match(/^\/feedback\/([a-f0-9-]+)\/status$/);
+        if (feedbackStatusMatch) {
+            const feedback = await feedbackRepo.get(feedbackStatusMatch[1]);
+            if (feedback) {
+                // Return only status-relevant fields
+                const status = {
+                    id: feedback.id,
+                    processed: feedback.processed,
+                    githubIssueNumber: feedback.githubIssueNumber,
+                    githubIssueUrl: feedback.githubIssueUrl,
+                    fixerStatus: feedback.fixerStatus,
+                    fixerMessage: feedback.fixerMessage,
+                    screenshotUrl: feedback.screenshotUrl,
+                };
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true, status }));
+            }
+            else {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'Feedback not found' }));
+            }
             return;
         }
         // Check for /feedback/:id (get single feedback)
